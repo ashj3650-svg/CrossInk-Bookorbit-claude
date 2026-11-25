@@ -588,8 +588,9 @@ class SimulatorSmokeTest {
                   CrossPointSettings::CHORD_QUICK_ACTIONS) == chordSetting->enumRawValues.end()) {
       fail("Quick Actions is missing from the Power + Up chord setting");
     }
-    // The counts are one past upstream's: this fork's BookOrbit Sync sits after its last action.
-    if (CrossPointSettings::HOME_READER != 36 || CrossPointSettings::SHORT_PWRBTN_COUNT != 38 ||
+    // The counts are past upstream's: this fork's BookOrbit Sync, Peek Page and Sleep at
+    // Chapter End sit after its last action.
+    if (CrossPointSettings::HOME_READER != 36 || CrossPointSettings::SHORT_PWRBTN_COUNT != 40 ||
         CrossPointSettings::CHORD_HOME_READER != 32 || CrossPointSettings::POWER_CHORD_ACTION_COUNT != 34) {
       fail("Home/Reader changed persisted shortcut IDs or counts");
     }

@@ -493,6 +493,10 @@ inline uint8_t shortcutRawValue(const ShortcutOptionCatalog catalog, const Cross
           return LongPress::LONG_MENU_BOOKORBIT_SYNC;
         case Action::LIBRARY:
           return LongPress::LONG_MENU_LIBRARY;
+        case Action::PEEK_PAGE:
+          return LongPress::LONG_MENU_PEEK_PAGE;
+        case Action::SLEEP_AT_CHAPTER_END:
+          return LongPress::LONG_MENU_SLEEP_AT_CHAPTER_END;
         case Action::PAGE_TURN:
         case Action::PREVIOUS_PAGE:
         case Action::NEARBY_POSITION_SYNC:

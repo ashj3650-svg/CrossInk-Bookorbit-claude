@@ -36,6 +36,9 @@ enum class EpubReaderMenuAction : uint8_t {
   SET_BOOK_DICTIONARY,
   STATUS_BAR_SETTINGS,
   RESET_BOOK_READER_SETTINGS,
+  SLEEP_AT_CHAPTER_END,
+  PIN_PEEK_PAGE,
+  GO_TO_PEEK_PAGE,
 };
 
 enum class ReaderDrawerTab : uint8_t { Font = 0, Layout = 1, More = 2, Location = 3, Settings = 4, Count };
@@ -152,6 +155,10 @@ enum class ReaderDrawerCatalogItem : uint8_t {
   NearbyPositionSync,
   SendNearbyBook,
   BookOrbitSync,  // this fork's provider, alongside upstream's KOReader SyncProgress
+  // This fork's reading aids (see ReaderDrawerAvailability::readingAids).
+  SleepAtChapterEnd,
+  PinPeekPage,
+  GoToPeekPage,
 };
 
 struct ReaderDrawerAvailability {
@@ -168,10 +175,13 @@ struct ReaderDrawerAvailability {
   // tests keep describing it; the reader drawer sets both from the build.
   bool hasKOReaderSync = true;
   bool hasBookOrbitSync = false;
+  // This fork's Sleep at Chapter End and Peek Page rows; off in upstream's catalog.
+  bool readingAids = false;
+  bool hasPeekPage = false;
 };
 
 struct ReaderDrawerTabCatalog {
-  std::array<ReaderDrawerCatalogItem, 13> items{};
+  std::array<ReaderDrawerCatalogItem, 16> items{};
   uint8_t count = 0;
 
   constexpr void add(const ReaderDrawerCatalogItem item) { items[count++] = item; }
@@ -209,6 +219,7 @@ constexpr ReaderDrawerCatalog makeReaderDrawerCatalog(const ReaderDrawerAvailabi
   more.add(ReaderDrawerCatalogItem::GoToPercent);
   if (available.hasStablePageNumbers) more.add(ReaderDrawerCatalogItem::GoToStablePage);
   more.add(ReaderDrawerCatalogItem::AutoPageTurn);
+  if (available.readingAids) more.add(ReaderDrawerCatalogItem::SleepAtChapterEnd);
   if (available.buttonDevice && available.globalStatsEnabled && available.bookStatsEnabled)
     more.add(ReaderDrawerCatalogItem::ReadingStats);
   if (available.hasFootnotes) more.add(ReaderDrawerCatalogItem::Footnotes);
@@ -218,6 +229,10 @@ constexpr ReaderDrawerCatalog makeReaderDrawerCatalog(const ReaderDrawerAvailabi
   if (available.hasBookmarks) {
     location.add(ReaderDrawerCatalogItem::ViewBookmarks);
     location.add(ReaderDrawerCatalogItem::DeleteBookmarks);
+  }
+  if (available.readingAids) {
+    location.add(ReaderDrawerCatalogItem::PinPeekPage);
+    if (available.hasPeekPage) location.add(ReaderDrawerCatalogItem::GoToPeekPage);
   }
   location.add(ReaderDrawerCatalogItem::SaveClipping);
   if (available.hasClippings) location.add(ReaderDrawerCatalogItem::ViewClippings);

@@ -756,6 +756,23 @@ whenever its timestamp is newer.
 A file shorter than 12 bytes, with another magic or with a timestamp of 0 or less, is no
 history at all: Smart sync then asks, and the sleep sync leaves the progress alone.
 
+## `last_read.bin`
+
+### Version 1
+
+`last_read.bin` records when the book was last read, in the book's content-keyed state
+directory (`/.crosspoint/book_<contentHash>/`). The reader writes it when a book opens,
+after reading the previous value, and again when the book closes. The "Previously..."
+recap card compares the stored time with the clock to decide whether you have been away
+long enough (Settings > Reader > Recap After Time Away). Nothing is written while the
+clock is not trusted (`WallClock::now` fails), so an unset clock never produces a
+bogus "away" time; the card is then skipped.
+
+Binary layout (8 bytes, little-endian):
+
+- `[0-3]` magic (`uint32_t` `0x424F4C52`)
+- `[4-7]` last-read time (`uint32_t`, UTC epoch seconds)
+
 ## `orphaned_clippings.bin`
 
 ### Version 1
@@ -782,6 +799,24 @@ Binary layout (all little-endian):
   - `[6-7]` `paragraphIndex` (`uint16_t`)
 
 A file whose magic or length does not match is ignored: no highlight is orphaned.
+
+## `peek.bin`
+
+### Version 1
+
+`peek.bin` holds the book's pinned Peek page (a map, a cast list), in the book's
+content-keyed state directory (`/.crosspoint/book_<contentHash>/`). It is written when a
+page is pinned from the reader menu or the Peek Page shortcut and deleted when it is
+unpinned. A page is stored the way bookmarks are, so it survives a font or layout change:
+the spine item, the paragraph the page starts with when known, and the position inside
+the spine item as a fraction.
+
+Binary layout (12 bytes, little-endian):
+
+- `[0-3]` magic (`uint32_t` `0x424F504B`)
+- `[4-5]` spine index (`uint16_t`)
+- `[6-7]` paragraph index (`uint16_t`, `0xFFFF` when unknown)
+- `[8-11]` progress within the spine item (`float`, 0 to 1)
 
 ## `replaced_chapters.bin`
 

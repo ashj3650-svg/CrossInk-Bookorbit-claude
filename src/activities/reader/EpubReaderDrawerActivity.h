@@ -55,6 +55,13 @@ class EpubReaderDrawerActivity final : public Activity {
            state.selectedIndex < activeTopIndex() + visibleRows;
   }
 #endif
+  // The chapter-end sleep countdown (0 = off) and the book's Peek page, for the rows
+  // that show and change them. Call before the drawer is started.
+  void setReadingAids(const uint8_t chapterEndSleep, const bool peekPinned, const bool onPeekPage) {
+    chapterEndSleepChapters = chapterEndSleep;
+    hasPeekPage = peekPinned;
+    isCurrentPagePeek = onPeekPage;
+  }
   void onEnter() override;
   void onExit() override;
   void loop() override;
@@ -133,6 +140,10 @@ class EpubReaderDrawerActivity final : public Activity {
   bool bookStatsEnabled = true;
   bool isCurrentPageBookmarked = false;
   bool isBookCompleted = false;
+  // Reading aids, handed over by setReadingAids() before onEnter().
+  uint8_t chapterEndSleepChapters = 0;
+  bool hasPeekPage = false;
+  bool isCurrentPagePeek = false;
   bool showReadingPaceReset = false;
   bool settingsChanged = false;
   bool didChangeSettings = false;

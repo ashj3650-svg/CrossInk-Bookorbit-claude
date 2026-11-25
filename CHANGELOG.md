@@ -9,6 +9,12 @@ on; for everything inherited from upstream, see the
 
 Based on CrossInk v1.6.1.
 
+### Added
+
+- A "Previously..." card when you open a book you have not read for a while: the book and chapter, how long ago you last read it, and the last lines you read. Any button continues to the page. Settings > Reader > Recap After Time Away chooses after how long it appears (1 day, 3 days or 1 week, 3 days by default) or turns it off. It needs the clock to be set, and skips books last read before this update.
+- Peek Page: pin one page of a book, such as a map or a cast list, and jump to it and back. Pin and go to it from the reader menu's Location tab, or set Peek Page as a shortcut (power button or long-press menu): the first press pins the page you are on, then each press jumps to the pinned page and the next press, or Back, returns you where you were. Reading on from the pinned page for more than 10 pages ends the peek where you are. The pinned page does not change your saved reading position.
+- Sleep at Chapter End: a bedtime timer counted in chapters. From the reader menu's More tab or a shortcut, choose to sleep after this chapter, 2 chapters or 3; the reader goes to sleep when you turn past the last page of that chapter. It lasts until you close the book.
+
 ### Fixed
 
 - A damaged settings or library file on the SD card (recent books, reader state, Wi-Fi networks, bookmarks, a book's cached details) can no longer crash the reader while it starts or opens a book. A file whose stored text length is impossible is now read as damaged and skipped, where the reader used to try to reserve up to 4 GB for it and restart.

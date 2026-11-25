@@ -452,9 +452,10 @@ void EpubReaderDrawerActivity::onEnter() {
 #else
   constexpr bool hasKOReaderSync = false;
 #endif
-  const ReaderDrawerCatalog catalog = makeReaderDrawerCatalog(
-      {hasFootnotes, hasDictionary, hasBookmarks, hasClippings, showReadingPaceReset, stablePageCount > 0,
-       !mappedInput.hasTouchHardware(), globalStatsEnabled, bookStatsEnabled, hasKOReaderSync, true});
+  const ReaderDrawerCatalog catalog =
+      makeReaderDrawerCatalog({hasFootnotes, hasDictionary, hasBookmarks, hasClippings, showReadingPaceReset,
+                               stablePageCount > 0, !mappedInput.hasTouchHardware(), globalStatsEnabled,
+                               bookStatsEnabled, hasKOReaderSync, true, true, hasPeekPage});
   for (size_t tab = 0; tab < rootRows.size(); ++tab) {
     rootRows[tab].reserve(catalog[tab].count);
     rootRows[tab].assign(catalog[tab].items.begin(), catalog[tab].items.begin() + catalog[tab].count);
@@ -1723,6 +1724,15 @@ void EpubReaderDrawerActivity::activateRow(const RowId row) {
       return;
     case RowId::AutoPageTurn:
       openPane(ReaderDrawerPane::AutoPageTurn);
+      return;
+    case RowId::SleepAtChapterEnd:
+      closeAndReturn(false, EpubReaderMenuAction::SLEEP_AT_CHAPTER_END);
+      return;
+    case RowId::PinPeekPage:
+      closeAndReturn(false, EpubReaderMenuAction::PIN_PEEK_PAGE);
+      return;
+    case RowId::GoToPeekPage:
+      closeAndReturn(false, EpubReaderMenuAction::GO_TO_PEEK_PAGE);
       return;
     case RowId::BookDictionary:
       openPane(ReaderDrawerPane::Dictionary);
@@ -3038,6 +3048,12 @@ const char* EpubReaderDrawerActivity::rowLabel(const RowId row) const {
       return tr(STR_INDEXING_METHOD);
     case RowId::ToggleCompleted:
       return isBookCompleted ? tr(STR_MARK_UNFINISHED) : tr(STR_MARK_FINISHED);
+    case RowId::SleepAtChapterEnd:
+      return tr(STR_SLEEP_AT_CHAPTER_END);
+    case RowId::PinPeekPage:
+      return isCurrentPagePeek ? tr(STR_UNPIN_PEEK_PAGE) : tr(STR_PIN_PEEK_PAGE);
+    case RowId::GoToPeekPage:
+      return tr(STR_PEEK_PAGE);
     case RowId::TrackBookStats:
       return tr(STR_TRACK_READING_STATS);
     case RowId::Controls:
@@ -3155,6 +3171,10 @@ const char* EpubReaderDrawerActivity::rowValue(const RowId row, char* buffer, co
     case RowId::AutoPageTurn:
       std::snprintf(buffer, bufferSize, "%us", autoPageTurnIntervalSeconds);
       return buffer;
+    case RowId::SleepAtChapterEnd:
+      if (chapterEndSleepChapters == 0) return tr(STR_STATE_OFF);
+      std::snprintf(buffer, bufferSize, "%u", static_cast<unsigned>(chapterEndSleepChapters));
+      return buffer;
     default:
       return nullptr;
   }
@@ -3187,6 +3207,7 @@ bool EpubReaderDrawerActivity::rowShowsNavigationCaret(const RowId row) const {
   switch (row) {
     case RowId::BookmarkToggle:
     case RowId::ToggleCompleted:
+    case RowId::PinPeekPage:
     case RowId::Screenshot:
     case RowId::DisplayQr:
     case RowId::Lookup:
