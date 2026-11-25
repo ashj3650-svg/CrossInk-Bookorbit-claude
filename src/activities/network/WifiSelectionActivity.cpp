@@ -267,7 +267,12 @@ void WifiSelectionActivity::onEnter() {
   app.on(ACTION_ROW, &WifiSelectionActivity::onRowEvent, this);
   app.setScreen(&WifiSelectionActivity::listScreen, this);
 
-  // Trigger first update to show scanning message
+  // A network joined already (Wi-Fi at Home) is used as it is.
+  const bool alreadyJoined =
+      WiFi.getMode() != WIFI_OFF && WiFi.status() == WL_CONNECTED && WiFi.localIP() != IPAddress(0, 0, 0, 0);
+  quietConnect = allowAutoConnect && (alreadyJoined || savedCredentialCount != 0);
+
+  // Trigger first update to show scanning message (skipped while quietConnect holds)
   requestUpdate();
   LOG_INF("WIFI", "starting auto-connect/scan free=%u maxAlloc=%u", ESP.getFreeHeap(), ESP.getMaxAllocHeap());
 
@@ -286,6 +291,17 @@ void WifiSelectionActivity::onEnter() {
       requestUpdate();
       return;
     }
+  }
+
+  if (allowAutoConnect && alreadyJoined) {
+    // checkConnectionStatus() finds it connected on the first loop and completes.
+    selectedSSID = WiFi.SSID().c_str();
+    LOG_INF("WIFI", "Already joined to %s; using that connection", selectedSSID.c_str());
+    usedSavedPassword = true;
+    autoConnecting = true;
+    state = WifiSelectionState::AUTO_CONNECTING;
+    connectionStartTime = millis();
+    return;
   }
 
   // Attempt to auto-connect to known networks. Try the last successful
@@ -1227,6 +1243,10 @@ void WifiSelectionActivity::render(RenderLock&&) {
   // Don't render if we're in a keyboard-entry state - we're just transitioning
   // from the keyboard subactivity back to the main activity
   if (state == WifiSelectionState::PASSWORD_ENTRY || state == WifiSelectionState::HIDDEN_SSID_ENTRY) {
+    return;
+  }
+  if (quietConnect && !manualNetworkListRequested &&
+      (state == WifiSelectionState::SCANNING || state == WifiSelectionState::AUTO_CONNECTING)) {
     return;
   }
 

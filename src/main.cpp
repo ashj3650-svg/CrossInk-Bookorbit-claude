@@ -118,6 +118,8 @@ inline esp_sleep_wakeup_cause_t esp_sleep_get_wakeup_cause() { return ESP_SLEEP_
 #include "components/UITheme.h"
 #include "components/icons/tablerFilledIcons.h"
 #include "fontIds.h"
+#include "network/BookOrbitBackgroundDownloads.h"
+#include "network/HomeWebServer.h"
 #include "network/HomeWifi.h"
 #include "network/UsbSerialFileTransfer.h"
 #ifdef SIMULATOR
@@ -1394,6 +1396,16 @@ void completeSleepAfterSleepSync() {
 // Enter deep sleep mode
 void enterDeepSleep(bool fromTimeout) {
   HalPowerManager::Lock powerLock;  // Ensure we are at normal CPU frequency for sleep preparation
+#if CROSSINK_APP_BACKGROUND_DOWNLOADS
+  // A shelf download still running stops cleanly before the radio goes; one that finished
+  // gets its bookkeeping.
+  BookOrbitBackgroundDownloads::cancelAll();
+  {
+    BookOrbitBackgroundDownloads::Finished done;
+    bool onCard = false;
+    while (BookOrbitBackgroundDownloads::takeFinished(done)) BookOrbitBackgroundDownloads::settle(done, onCard);
+  }
+#endif
   HomeWifi::stop("going to sleep");
   // Asleep from the startup PIN lock: the book or Home it was guarding is still the
   // place to wake into.
@@ -2139,7 +2151,10 @@ void loop() {
 
   // Check for any user activity (button press or release) or active background work
   static unsigned long lastActivityTime = millis();
-  if (userInputReceived || activityManager.preventAutoSleep()) {
+  // A book downloading in the background (from a Home shelf), or a file arriving through
+  // Home's web page, keeps the device awake too.
+  if (userInputReceived || activityManager.preventAutoSleep() || BookOrbitBackgroundDownloads::busy() ||
+      HomeWebServer::uploading()) {
     lastActivityTime = millis();         // Reset inactivity timer
     powerManager.setPowerSaving(false);  // Restore normal CPU frequency on user activity
   }
@@ -2332,6 +2347,25 @@ void loop() {
 #endif
   const unsigned long activityDuration = millis() - activityStartTime;
   HomeWifi::tick(activityManager.isHomeActivity(), millis() - lastActivityTime);
+#if CROSSINK_APP_BACKGROUND_DOWNLOADS
+  // Home and the catalog settle their own finished downloads (and say how they went); a
+  // shelf book that ends while a book is open is settled here, quietly.
+  if (!activityManager.isHomeActivity() && !activityManager.isBookOrbitCatalogActivity()) {
+    BookOrbitBackgroundDownloads::Finished done;
+    bool onCard = false;
+    while (BookOrbitBackgroundDownloads::takeFinished(done)) BookOrbitBackgroundDownloads::settle(done, onCard);
+  }
+#endif
+  {
+    // Home's status bar shows a Wi-Fi icon while joined: repaint it when that changes.
+    // Other screens pick the change up with their next paint.
+    static bool wifiIconShown = false;
+    const bool wifiUp = HomeWifi::linkUp();
+    if (wifiUp != wifiIconShown) {
+      wifiIconShown = wifiUp;
+      if (activityManager.isHomeActivity()) activityManager.requestUpdate();
+    }
+  }
 
 #ifdef SIMULATOR
   runSimulatorSmokeTestTick();

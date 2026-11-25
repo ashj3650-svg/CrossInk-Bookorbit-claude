@@ -154,11 +154,17 @@ constexpr Decision decide(const Position& local, const Position& remote, const i
 // recently wins. `localSavedAt` is when this device's position last moved
 // (ProgressSaveTime), 0 when unknown. A server date that only changed because BookOrbit's
 // web reader opened the book (onlyRedated()) is no newer save. Without both dates the
-// marker rules of decide() apply, and their questions stay for a person.
+// marker rules of decide() apply. A book never synced before has no marker either: the
+// further position wins it, as nobody is there to answer the question. A conflict the
+// marker does see stays for a person.
 constexpr Decision decideNewestSave(const Position& local, const Position& remote, const int64_t remoteTimestamp,
                                     const Marker& marker, const int64_t localSavedAt) {
   if (samePlace(local, remote)) return Decision::AlreadySynced;
-  if (localSavedAt <= 0 || remoteTimestamp <= 0) return decide(local, remote, remoteTimestamp, marker);
+  if (localSavedAt <= 0 || remoteTimestamp <= 0) {
+    const Decision byMarker = decide(local, remote, remoteTimestamp, marker);
+    if (byMarker != Decision::AskNoHistory) return byMarker;
+    return isAhead(local, remote) ? Decision::UploadLocal : Decision::ApplyRemote;
+  }
   const bool serverNewer = remoteTimestamp > localSavedAt && !onlyRedated(remote, marker);
   return serverNewer ? Decision::ApplyRemote : Decision::UploadLocal;
 }

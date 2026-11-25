@@ -140,6 +140,13 @@ class HomeActivity final : public Activity {
   void openMinimalMenu();
   void loopBookOrbitHome();
   void activateBookOrbitStop(const BookOrbitHomeUi::Stop& stop);
+  // A shelf book not on the card downloads in the background while Wi-Fi at Home is up
+  // (boards with PSRAM): a short notice over Home instead of the catalog's download screen.
+  bool queueShelfDownload(int64_t bookId);
+  void pollShelfDownloads();
+  void showShelfNotice(const char* message);
+  std::string shelfNotice;  // shown over the BookOrbit Home while not empty; render-locked
+  unsigned long shelfNoticeUntilMs = 0;
   void loadBookOrbitThumbnails();
   void loadAllBookStats();
   void loadRecentCovers(int coverHeight);

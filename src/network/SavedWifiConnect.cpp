@@ -1,6 +1,7 @@
 #include "SavedWifiConnect.h"
 
 #include <Arduino.h>
+#include <HalPowerManager.h>
 #include <Logging.h>
 #include <WiFi.h>
 
@@ -127,6 +128,12 @@ bool SavedWifiConnect::startStation() {
     return false;
   }
 
+  // Full CPU speed before the radio starts. Home drops the CPU to its idle speed after 3
+  // seconds without a press, which is just when Wi-Fi at Home starts the radio; the main
+  // loop then put it back to full speed (setPowerSaving() refuses the idle speed while
+  // Wi-Fi is on) in the middle of the join. Started at full speed, the radio keeps one
+  // CPU clock for as long as it is on.
+  powerManager.setPowerSaving(false);
   WiFi.persistent(false);  // WifiCredentialStore owns the credentials; keep the SDK's NVS copy out of it
   if (!WiFi.mode(WIFI_STA)) {
     LOG_ERR("WIFI", "Failed to set station mode for a background join");

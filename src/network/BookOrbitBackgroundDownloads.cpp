@@ -11,7 +11,9 @@
 #include <deque>
 #include <utility>
 
+#include "BookOrbitDownloadIndex.h"
 #include "BookOrbitSyncClient.h"
+#include "I18n.h"
 #include "network/BookOrbitCatalogClient.h"
 
 namespace {
@@ -212,6 +214,32 @@ bool BookOrbitBackgroundDownloads::takeFinished(Finished& out) {
   out = std::move(finished.front());
   finished.pop_front();
   return true;
+}
+
+const char* BookOrbitBackgroundDownloads::settle(const Finished& done, bool& onCard) {
+  using BookOrbitBookDownload::Result;
+  onCard = false;
+  switch (done.result) {
+    case Result::Downloaded:
+      BookOrbitBookDownload::finishTransfer(done.bookId, done.path);
+      onCard = true;
+      return tr(STR_BOOK_DOWNLOADED);
+    case Result::AlreadyOnCard:
+      BookOrbitDownloadIndex::record(done.bookId, done.path);
+      onCard = true;
+      return nullptr;
+    case Result::NoEpub:
+      return tr(STR_NO_EPUB_FORMAT);
+    case Result::Unreachable:
+      return tr(STR_BOOKORBIT_CATALOG_ERROR);
+    case Result::NoSpace:
+      return tr(STR_SD_CARD_FULL);
+    case Result::Failed:
+      return tr(STR_DOWNLOAD_FAILED);
+    case Result::Cancelled:
+      return nullptr;
+  }
+  return nullptr;
 }
 
 void BookOrbitBackgroundDownloads::cancelAll() {

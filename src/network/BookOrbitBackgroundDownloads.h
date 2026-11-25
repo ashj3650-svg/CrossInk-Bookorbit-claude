@@ -55,6 +55,11 @@ uint32_t changeCount();
 // its download index record.
 bool takeFinished(Finished& out);
 
+// The main task's half of a finished book (finishTransfer() or the download index record).
+// Returns what to tell the user, or nullptr when nothing needs saying; `onCard` is set when
+// the book is now on the card.
+const char* settle(const Finished& done, bool& onCard);
+
 // Drops the waiting books, stops the one downloading (its staged file is removed and a
 // copy it would have replaced stays) and waits for the task to end. Books that already
 // ended stay to be taken. Main task only.

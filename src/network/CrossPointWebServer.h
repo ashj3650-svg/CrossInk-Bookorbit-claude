@@ -64,6 +64,8 @@ class CrossPointWebServer {
   bool isRunning() const { return running; }
 
   WsUploadStatus getWsUploadStatus() const;
+  // getWsUploadStatus() without copying the file names, for a per-loop check.
+  bool wsUploadActive() const;
 
   // Borrowed callback/context, owned by the activity that owns this server.
   using UploadCancelCheck = bool (*)(void*);

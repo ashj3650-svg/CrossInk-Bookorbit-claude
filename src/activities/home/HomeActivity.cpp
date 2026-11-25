@@ -46,6 +46,8 @@
 #include "components/themes/lyra/LyraCarouselTheme.h"
 #include "components/themes/minimal/MinimalTheme.h"
 #include "fontIds.h"
+#include "network/BookOrbitBackgroundDownloads.h"
+#include "network/HomeWifi.h"
 
 namespace {
 constexpr uint32_t CAROUSEL_CACHE_MAGIC = 0x43434152;  // "CCAR"
@@ -1144,7 +1146,58 @@ void HomeActivity::openMinimalMenu() {
   requestUpdate();
 }
 
+namespace {
+constexpr unsigned long SHELF_NOTICE_MS = 2500;
+}  // namespace
+
+bool HomeActivity::queueShelfDownload(const int64_t bookId) {
+#if CROSSINK_APP_BACKGROUND_DOWNLOADS
+  if (!HomeWifi::isConnected() || !BOOKORBIT_STORE.hasCredentials()) return false;
+  if (BookOrbitBackgroundDownloads::progressOf(bookId) < 0) {
+    BookOrbitBackgroundDownloads::Request request;
+    request.bookId = bookId;
+    if (!BookOrbitBackgroundDownloads::enqueue(request)) return false;  // logged; the catalog takes it
+  }
+  showShelfNotice(tr(STR_DOWNLOADING));
+  return true;
+#else
+  (void)bookId;
+  return false;
+#endif
+}
+
+void HomeActivity::showShelfNotice(const char* message) {
+  {
+    RenderLock lock(*this);
+    shelfNotice = message;
+  }
+  shelfNoticeUntilMs = millis() + SHELF_NOTICE_MS;
+  requestUpdate();
+}
+
+void HomeActivity::pollShelfDownloads() {
+#if CROSSINK_APP_BACKGROUND_DOWNLOADS
+  BookOrbitBackgroundDownloads::Finished done;
+  while (BookOrbitBackgroundDownloads::takeFinished(done)) {
+    bool onCard = false;
+    const char* notice = BookOrbitBackgroundDownloads::settle(done, onCard);
+    LOG_INF("HOME", "Shelf download of book %lld ended (%d)", static_cast<long long>(done.bookId),
+            static_cast<int>(done.result));
+    if (notice) showShelfNotice(notice);
+  }
+#endif
+  if (!shelfNotice.empty() && static_cast<long>(millis() - shelfNoticeUntilMs) >= 0) {
+    {
+      RenderLock lock(*this);
+      shelfNotice.clear();
+    }
+    if (bookOrbitUi) bookOrbitUi->requestRepaint();
+    requestUpdate();
+  }
+}
+
 void HomeActivity::loopBookOrbitHome() {
+  pollShelfDownloads();
   if (waitingForInitialFrontRelease()) return;
 
   const auto movePage = [this](const int delta) {
@@ -1230,7 +1283,7 @@ void HomeActivity::activateBookOrbitStop(const BookOrbitHomeUi::Stop& stop) {
       BookOrbitDownloadIndex::unload();
       if (onCard) {
         onSelectBook(path);
-      } else {
+      } else if (!queueShelfDownload(book->id)) {
         BookOrbitCatalogLink link;
         link.bookId = book->id;
         link.title = book->title;
@@ -2372,6 +2425,11 @@ void HomeActivity::render(RenderLock&&) {
   if (bookOrbitUi && !minimalMenuOpen) {
     bookOrbitUi->render(initialRefreshMode);
     initialRefreshMode = HalDisplay::FAST_REFRESH;
+    if (!shelfNotice.empty()) {
+      // Over the page just painted (drawPopup shows it); the page is painted whole again
+      // once the notice has gone.
+      GUI.drawPopup(renderer, shelfNotice.c_str());
+    }
     firstRenderDone = true;
     if (!recentsLoaded && !recentsLoading) loadBookOrbitThumbnails();
     return;

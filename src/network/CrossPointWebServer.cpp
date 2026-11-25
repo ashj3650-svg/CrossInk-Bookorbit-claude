@@ -584,6 +584,8 @@ void CrossPointWebServer::handleClient() {
   }
 }
 
+bool CrossPointWebServer::wsUploadActive() const { return wsUploadInProgress; }
+
 CrossPointWebServer::WsUploadStatus CrossPointWebServer::getWsUploadStatus() const {
   WsUploadStatus status;
   status.inProgress = wsUploadInProgress;

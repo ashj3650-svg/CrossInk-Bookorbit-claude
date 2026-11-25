@@ -190,6 +190,7 @@ class ActivityManager {
   // gestures until it is dismissed.
   bool blocksGlobalInput() const;
   bool isHomeActivity() const;
+  bool isBookOrbitCatalogActivity() const;
   bool isReaderActivity() const;
   bool isDeviceLocked() const;
   bool openReaderSettingsForTouchscreenEscapeHatch();

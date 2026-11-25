@@ -103,6 +103,9 @@ class WifiSelectionActivity final : public Activity {
 
   // True when the user stopped auto-connect and asked to see the scan result.
   bool manualNetworkListRequested = false;
+  // Joining a saved network on its own draws nothing: the screen underneath stays until the
+  // join is over, and only a failure (or a press asking for the list) shows this screen.
+  bool quietConnect = false;
 
   // Saved SSIDs already attempted during the current auto-connect session.
   std::vector<std::string> autoAttemptedSsids;

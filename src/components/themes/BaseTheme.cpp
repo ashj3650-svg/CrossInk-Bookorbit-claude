@@ -15,6 +15,7 @@
 #include <cmath>
 #include <cstdint>
 #include <cstdio>
+#include <iterator>
 #include <string>
 
 #include "CrossPointSettings.h"
@@ -29,6 +30,7 @@
 #include "components/UITheme.h"
 #include "components/UIThemeTokens.h"
 #include "fontIds.h"
+#include "network/HomeWifi.h"
 
 // Internal constants
 namespace {
@@ -64,6 +66,25 @@ void BaseTheme::drawBatteryLightningBolt(const GfxRenderer& renderer, int boltX,
   renderer.drawLine(boltX + 2, boltY + 6, boltX + 3, boltY + 6, foregroundBlack);
   renderer.drawLine(boltX + 1, boltY + 7, boltX + 2, boltY + 7, foregroundBlack);
 }
+
+namespace {
+// A Wi-Fi fan, one row per entry, bit 14 the leftmost pixel. Shown beside the battery
+// outside the reader while a network is joined.
+constexpr int WIFI_ICON_WIDTH = 15;
+constexpr int WIFI_ICON_GAP = 6;
+constexpr uint16_t WIFI_ICON_ROWS[] = {0x07F0, 0x180C, 0x2002, 0x43E1, 0x0C18, 0x1004,
+                                       0x03E0, 0x0410, 0x0000, 0x0080, 0x01C0, 0x0080};
+
+void drawWifiIcon(const GfxRenderer& renderer, const int x, const int y, const bool foregroundBlack) {
+  int row = 0;
+  for (const uint16_t bits : WIFI_ICON_ROWS) {
+    for (int col = 0; col < WIFI_ICON_WIDTH; col++) {
+      if (bits & (1u << (WIFI_ICON_WIDTH - 1 - col))) renderer.drawPixel(x + col, y + row, foregroundBlack);
+    }
+    row++;
+  }
+}
+}  // namespace
 
 void BaseTheme::fillBatteryIcon(const GfxRenderer& renderer, Rect rect, uint16_t percentage,
                                 const bool foregroundBlack) const {
@@ -932,9 +953,12 @@ void BaseTheme::drawReaderStatusBar(const GfxRenderer& renderer, const ReaderSta
         return nullptr;
     }
   };
+  // Outside the reader the battery item also says whether Wi-Fi is up (Wi-Fi at Home, or a
+  // network screen's connection).
+  const int wifiWidth = content.outsideReader && HomeWifi::linkUp() ? WIFI_ICON_WIDTH + WIFI_ICON_GAP : 0;
   const auto measureItem = [&](const ReaderStatusBarItem item, const int maxWidth) {
     if (item == ReaderStatusBarItem::Battery) {
-      int width = metrics.batteryWidth;
+      int width = metrics.batteryWidth + wifiWidth;
       if (batteryPercent) {
         char percent[8];
         snprintf(percent, sizeof(percent), "%u%%", static_cast<unsigned>(powerManager.getBatteryPercentage()));
@@ -946,9 +970,19 @@ void BaseTheme::drawReaderStatusBar(const GfxRenderer& renderer, const ReaderSta
     const char* value = itemText(item, scratch, sizeof(scratch));
     return value && value[0] ? std::min(maxWidth, renderer.getTextWidth(SMALL_FONT_ID, value)) : 0;
   };
-  const auto drawItem = [&](const ReaderStatusBarItem item, const int x, const int allowedWidth,
-                            const bool alignRight) {
+  const auto drawItem = [&](const ReaderStatusBarItem item, int x, int allowedWidth, const bool alignRight) {
     if (item == ReaderStatusBarItem::Battery) {
+      // The Wi-Fi icon sits on the battery's outer side, and gives way first when space is short.
+      if (wifiWidth > 0 && allowedWidth >= metrics.batteryWidth + wifiWidth) {
+        const int iconY = textY + (metrics.batteryHeight - static_cast<int>(std::size(WIFI_ICON_ROWS))) / 2;
+        if (top && alignRight) {
+          drawWifiIcon(renderer, x, iconY, foregroundBlack);
+          x += wifiWidth;
+        } else {
+          drawWifiIcon(renderer, x + allowedWidth - WIFI_ICON_WIDTH, iconY, foregroundBlack);
+        }
+        allowedWidth -= wifiWidth;
+      }
       if (allowedWidth < metrics.batteryWidth) return;
       char percent[8];
       snprintf(percent, sizeof(percent), "%u%%", static_cast<unsigned>(powerManager.getBatteryPercentage()));

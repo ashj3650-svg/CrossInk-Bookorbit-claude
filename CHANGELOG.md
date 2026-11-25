@@ -7,6 +7,22 @@ on; for everything inherited from upstream, see the
 
 ## [Unreleased]
 
+### Added
+
+- A Wi-Fi icon next to the battery at the top of Home and the other screens outside the reader while the reader is connected to a network.
+- The file transfer web page is always there while Wi-Fi at Home is connected (X4 Classic, X4 Pro and reTerminal Sticky): open http://crosspoint.local/ or the reader's IP address in a browser, with no File Transfer screen. WebDAV and the Calibre plugin reach the reader the same way. It stops when you open a book or another screen, and while a file arrives the reader stays awake.
+
+### Changed
+
+- With Wi-Fi at Home on, File Transfer no longer lists Join a Network and Calibre Wireless, which the web page above replaces. Create Hotspot, USB Drive and the Nearby Device entries stay. Turning Wi-Fi at Home off brings them back.
+- Joining a saved Wi-Fi network no longer shows the Wi-Fi networks screen while it scans and connects: the screen you came from stays up, and the Wi-Fi screen appears only when no saved network answers (or when you press Confirm to pick one). A screen opened while Wi-Fi at Home is already connected uses that connection straight away.
+- A BookOrbit Home shelf book that is not on the card downloads in the background while Wi-Fi at Home is connected (X4 Classic, X4 Pro and reTerminal Sticky): a short "Downloading..." notice instead of the downloading screen, then a notice when it is in. The reader stays awake meanwhile, opening a book lets it finish, and sleeping cancels it.
+
+### Fixed
+
+- Wi-Fi at Home did not connect on the device. It started the radio just as Home lowered the CPU speed for idling, and the speed was raised again in the middle of the join; the radio now always starts at full speed. If your usual network does not answer at the first try, it gets a second try after the scan. The clock is also set from the internet on that connection when it is unknown.
+- The sync behind the sleep screen skipped a book that had never been synced before (no record of a previous sync, and no date for this reader's position, as when it was opened before the clock was set). Such a book now takes the further of the two positions.
+
 ## [v1.6.1+bookorbit.10] - 2026-11-25
 
 Based on CrossInk v1.6.1.
