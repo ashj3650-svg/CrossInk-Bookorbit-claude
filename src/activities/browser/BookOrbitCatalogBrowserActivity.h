@@ -28,7 +28,17 @@ class OptionPopup;
  */
 class BookOrbitCatalogBrowserActivity final : public Activity {
  public:
-  enum class BrowserState { CHECK_WIFI, WIFI_SELECTION, LOADING, BROWSING, DOWNLOADING, ERROR, SEARCH_INPUT };
+  // FINISHING_DOWNLOADS: leaving waits for the background downloads (Back cancels them).
+  enum class BrowserState {
+    CHECK_WIFI,
+    WIFI_SELECTION,
+    LOADING,
+    BROWSING,
+    DOWNLOADING,
+    ERROR,
+    SEARCH_INPUT,
+    FINISHING_DOWNLOADS
+  };
   enum class EntryType { SECTION, FACET_SECTION, FACET, LOCAL_SECTION, LOCAL_BOOK, SEARCH, BOOK };
   // Which listing the BROWSING state currently shows; drives Back navigation.
   enum class NavLevel { Root, FacetList, Books };
@@ -298,4 +308,21 @@ class BookOrbitCatalogBrowserActivity final : public Activity {
   // The transfer itself, then the listing it freed is rebuilt.
   void transferBook(int64_t bookId, int64_t fileId, const std::string& finalPath);
   bool preventAutoSleep() override;
+
+  // Background downloads (CROSSINK_APP_BACKGROUND_DOWNLOADS): a book row shows its progress
+  // while the catalog stays usable, and a short notice says how each one ended.
+  uint32_t seenDownloadChanges = 0;
+  unsigned long lastDownloadRepaintMs = 0;
+  std::string noticeMessage;  // drawn over the listing until noticeUntilMs
+  unsigned long noticeUntilMs = 0;
+  std::string leavePath;  // FINISHING_DOWNLOADS: the book to open once they are done, "" for Home
+  void queueDownload(int64_t bookId, const std::string& replacePath, bool takeExisting);
+  // The main task's half of each book the worker ended: bookkeeping, the row, the notice.
+  void collectFinishedDownloads(bool notify = true);
+  void pollBackgroundDownloads();
+  // True when leaving has to wait for downloads: the session restarts on its way out,
+  // which would cut them off. `path` is the book to open after, "" for Home.
+  bool deferLeaveForDownloads(const std::string& path);
+  void finishLeaving();
+  void showNotice(const char* message);
 };

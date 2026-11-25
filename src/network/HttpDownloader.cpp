@@ -686,7 +686,7 @@ HttpDownloader::DownloadError HttpDownloader::downloadToFile(const std::string& 
       if (options.checkFreeSpace && totalBytes > 0 && freeBytes < neededBytes) result = INSUFFICIENT_SPACE;
     }
 #endif
-    if (result == ABORTED || !options.preservePartial) {
+    if ((result == ABORTED && !options.keepPartialOnAbort) || !options.preservePartial) {
       Storage.remove(writePath.c_str());
     }
     return result;

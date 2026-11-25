@@ -44,6 +44,7 @@
 #include "components/UITheme.h"
 #include "components/themes/bookorbit/BookOrbitHomeLayout.h"
 #include "fontIds.h"
+#include "network/BookOrbitAutoDownload.h"
 #include "network/SavedWifiConnect.h"
 #include "util/BookContentId.h"
 #include "util/ProgressSaveTime.h"
@@ -320,6 +321,17 @@ void BookOrbitSyncActivity::runSleepSync() {
         BookOrbitRecentSync::syncRecentBooks(renderer, epubPath, &sleepSyncWakeRequested);
     LOG_INF("BookOrbit", "Recent books: %u checked, %u updated here, %u sent", static_cast<unsigned>(recent.checked),
             static_cast<unsigned>(recent.applied), static_cast<unsigned>(recent.uploaded));
+  }
+#endif
+#if CROSSINK_APP_SLEEP_AUTO_DOWNLOAD
+  // Then the books added to the server since the last sleep, still on this connection and
+  // before the Home refresh, so its scan already counts them as on the device.
+  if (wifiConnectedForSleepSync && state != SYNC_FAILED && !sleepSyncWakeRequested()) {
+    const BookOrbitAutoDownload::Summary added = BookOrbitAutoDownload::run(&sleepSyncWakeRequested);
+    if (added.downloaded > 0 || added.cardFull) {
+      LOG_INF("BookOrbit", "New books: %u downloaded%s", static_cast<unsigned>(added.downloaded),
+              added.cardFull ? ", card nearly full" : "");
+    }
   }
 #endif
   // The BookOrbit Home draws from what this boot's network leaves behind. Each step is

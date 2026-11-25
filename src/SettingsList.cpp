@@ -395,6 +395,17 @@ const std::vector<SettingInfo>& getBaseSettingsList() {
           BOOKORBIT_STORE.saveToFile();
         },
         "boSyncOnSleep", StrId::STR_BOOKORBIT_SYNC));
+#if CROSSINK_APP_SLEEP_AUTO_DOWNLOAD
+    add(SettingInfo::DynamicEnum(
+        StrId::STR_BOOKORBIT_AUTO_DOWNLOAD, {StrId::STR_STATE_OFF, StrId::STR_STATE_ON},
+        [] { return static_cast<uint8_t>(BOOKORBIT_STORE.getAutoDownloadNew()); },
+        [](uint8_t v) {
+          // Only a change moves the watermark: saving the web form again must not skip
+          // the books waiting for the next sleep.
+          if ((v != 0) != BOOKORBIT_STORE.getAutoDownloadNew()) BookOrbitAutoDownload::setEnabled(v != 0);
+        },
+        "boAutoDownload", StrId::STR_BOOKORBIT_SYNC));
+#endif
 
     // Legacy fields stay in JSON for one-time status bar migration; the web
     // editor uses /api/status-bars instead of exposing these controls.

@@ -6,9 +6,12 @@
 #endif
 #include <HalStorage.h>
 #include <Logging.h>
+#include <freertos/FreeRTOS.h>
+#include <freertos/semphr.h>
 #include <strings.h>
 
 #include <algorithm>
+#include <atomic>
 #include <cctype>
 #include <cstdio>
 #include <cstring>
@@ -21,6 +24,30 @@
 #include "activities/reader/ReadingStatsUtils.h"
 
 bool BookOrbitCatalogClient::lastFetchBadResponse = false;
+
+namespace {
+SemaphoreHandle_t networkMutex = nullptr;
+std::atomic<int> waitingRequests{0};
+}  // namespace
+
+bool BookOrbitCatalogClient::requestWaiting() { return waitingRequests.load() > 0; }
+
+void BookOrbitCatalogClient::createNetworkLock() {
+  if (networkMutex) return;
+  networkMutex = xSemaphoreCreateMutex();
+  if (!networkMutex) LOG_ERR("BookOrbit", "Cannot create the catalog network lock");
+}
+
+BookOrbitCatalogClient::NetworkLock::NetworkLock() {
+  if (!networkMutex) return;
+  waitingRequests.fetch_add(1);
+  held = xSemaphoreTake(networkMutex, portMAX_DELAY) == pdTRUE;
+  waitingRequests.fetch_sub(1);
+}
+
+BookOrbitCatalogClient::NetworkLock::~NetworkLock() {
+  if (held) xSemaphoreGive(networkMutex);
+}
 
 namespace {
 // Classify a response body that failed to parse as JSON, for actionable logs.
@@ -82,6 +109,7 @@ struct FileJsonReader {
 // there with a filter that keeps only the handful of fields we actually read.
 bool fetchJson(const std::string& url, const JsonDocument& filter, JsonDocument& outDoc) {
   constexpr char TMP_PATH[] = "/.crosspoint/bookorbit_catalog.json";
+  const BookOrbitCatalogClient::NetworkLock lock;
   BookOrbitCatalogClient::lastFetchBadResponse = false;
 
   // Two attempts: TLS on the C3 runs with a few KB of headroom, so a fetch can fail
@@ -458,6 +486,7 @@ HttpDownloader::DownloadError BookOrbitCatalogClient::downloadThumbnail(const in
   options.transport = HttpDownloader::Transport::WOLFSSL;
   options.clientRxBufferSize = 2048;
   if (shouldStop != nullptr) options.shouldCancel = shouldStop;
+  const NetworkLock lock;
   return HttpDownloader::downloadToFile(url, destPath, nullptr, nullptr, "", "", std::move(options));
 }
 
@@ -605,5 +634,6 @@ HttpDownloader::DownloadError BookOrbitCatalogClient::downloadFile(const int64_t
   // Same transport and trust as the JSON endpoints: this request carries the same
   // credentials, and mbedTLS cannot complete the handshake on this hardware.
   options.transport = HttpDownloader::Transport::WOLFSSL;
+  const NetworkLock lock;
   return HttpDownloader::downloadToFile(url, destPath, std::move(progress), cancelFlag, "", "", std::move(options));
 }

@@ -21,6 +21,7 @@
 #include "QuickActions.h"
 #include "activities/settings/SettingsActivity.h"
 #include "components/UITheme.h"
+#include "network/BookOrbitAutoDownload.h"
 #include "network/HomeWifi.h"
 #include "util/Dictionary.h"
 #include "util/DictionaryRegistry.h"
@@ -605,8 +606,9 @@ inline constexpr size_t BASE_SETTINGS_KOREADER_ENTRIES = 5;
 #else
 inline constexpr size_t BASE_SETTINGS_KOREADER_ENTRIES = 0;
 #endif
-inline constexpr size_t BASE_SETTINGS_CAPACITY =
-    102 + 3 + (CROSSINK_APP_HOME_WIFI ? 1 : 0) + (CROSSINK_APP_CAP_TOUCH ? 9 : 0) + BASE_SETTINGS_KOREADER_ENTRIES;
+inline constexpr size_t BASE_SETTINGS_CAPACITY = 102 + 3 + (CROSSINK_APP_HOME_WIFI ? 1 : 0) +
+                                                 (CROSSINK_APP_SLEEP_AUTO_DOWNLOAD ? 1 : 0) +
+                                                 (CROSSINK_APP_CAP_TOUCH ? 9 : 0) + BASE_SETTINGS_KOREADER_ENTRIES;
 
 const std::vector<SettingInfo>& getBaseSettingsList();
 

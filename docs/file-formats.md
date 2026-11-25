@@ -1064,6 +1064,13 @@ Read, 3 collection or 4 SmartScope, and only a collection or SmartScope has an i
 name (`3:12:Science fiction`, `2::`). The name runs to the end of the string, so it may
 hold colons. A missing or unreadable value falls back to Discover over Recently Added.
 
+Download New Books keeps three more keys there: `autoDownloadNew` (the setting), and the
+newest book the sleep sync has taken so far, `autoDownloadAfter` (when it was added, UTC epoch
+seconds) and `autoDownloadAfterId` (its book id, for books added the same second). Turning the
+setting on sets `autoDownloadAfter` to the current time, or to 0 when the clock cannot be
+trusted, in which case the next sleep sync sets it to the newest book Recently Added lists
+and downloads nothing that time. Missing keys read as off.
+
 ## `/.crosspoint/wallclock.bin`
 
 ### Version 1

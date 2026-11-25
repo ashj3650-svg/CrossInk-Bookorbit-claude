@@ -76,6 +76,10 @@ class HttpDownloader {
     // which also picks up one a reset left behind). The next staged download to destPath
     // removes a leftover (DownloadFileSwap::recover), so a caller resumes it before that.
     bool keepReplaced = false;
+    // With preservePartial: a cancelled transfer keeps what it wrote as well, for a caller
+    // that pauses a download (resumePartial picks it up) rather than giving it up. That
+    // caller removes the partial file when it does give up.
+    bool keepPartialOnAbort = false;
     // Checks the finished file before it is accepted (and, with stageAsPart,
     // before it replaces destPath). Returning false fails the download and
     // removes the file. Catches bodies cut short without a Content-Length.

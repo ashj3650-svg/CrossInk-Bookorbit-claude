@@ -145,6 +145,25 @@ class BookOrbitCatalogClient {
   // UI distinguish "check your connection" from "check your server".
   static bool lastFetchBadResponse;
 
+  // Catalog requests made from more than one task (a background download beside the
+  // browser) take turns: wolfSSL is built single-threaded, and the JSON fetches share one
+  // response file. createNetworkLock() runs once, on the main task, before a second task
+  // makes any request; until then a NetworkLock does nothing.
+  static void createNetworkLock();
+  // True while a request waits for the lock: a long download held by another task pauses
+  // (and resumes once the request is through) instead of keeping the browser waiting.
+  static bool requestWaiting();
+  class NetworkLock {
+   public:
+    NetworkLock();
+    ~NetworkLock();
+    NetworkLock(const NetworkLock&) = delete;
+    NetworkLock& operator=(const NetworkLock&) = delete;
+
+   private:
+    bool held = false;
+  };
+
   /** Fetch the catalog root sections list. Returns false on any failure. */
   static bool fetchRootSections(std::vector<BookOrbitCatalogSection>& outSections);
 
