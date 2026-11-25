@@ -7,6 +7,8 @@ on; for everything inherited from upstream, see the
 
 ## [Unreleased]
 
+## [v1.6.1+bookorbit.10] - 2026-11-25
+
 Based on CrossInk v1.6.1.
 
 ### Added
@@ -19,6 +21,15 @@ Based on CrossInk v1.6.1.
 - The sleep sync now also syncs the reading position of your other recent books, up to 10 (X4 Classic, X4 Pro and reTerminal Sticky). For these, and now for the book you were reading too, the sync behind the sleep screen keeps whichever position was saved most recently, on this reader or elsewhere, where it used to leave a disagreement for the next manual sync. A position that only changed date because BookOrbit's web reader opened the book does not count as a newer save. The reader now records when each book's position last moved; books not read since this update keep the previous behavior until their next page turn.
 - Download New Books (X4 Classic, X4 Pro and reTerminal Sticky): the sleep sync can download the books added to your BookOrbit library, on the Wi-Fi connection it already has. Turn it on in Settings > BookOrbit Sync; only books added after that are downloaded, up to 5 per sleep, oldest first, into the catalog's download folder. A book already on the card is not downloaded again, nor is one you delete afterwards. It stops when the card is nearly full (5% of the card or 512 MB left, on exFAT cards; elsewhere when a download no longer fits) and when you wake the reader.
 - Background catalog downloads (X4 Classic, X4 Pro and reTerminal Sticky): choosing Download in the BookOrbit catalog no longer shows a downloading screen. The book downloads while you keep browsing, its row shows how far it got, and you can queue up to 8 books. A short message says when each one is done or why it failed. Leaving the catalog or opening a book waits for the downloads with a "Finishing downloads..." screen, where Back cancels the rest. A Home shelf book and a sync's update of the open book still download on their own screen.
+
+- Device PIN: a four-digit, numbers-only PIN the reader asks for each time it is turned on or woken from sleep. Turn it on in Settings > System > Device > Device PIN, which asks for the PIN twice; the same row changes it or turns it off. On the PIN screen Up and Right raise the digit in the highlighted box, Down and Left lower it, Confirm moves to the next box and checks the PIN after the fourth, and Back steps back a box; touch devices also get a number pad. Power can still put the reader to sleep, and once unlocked it opens the book or Home it would have opened anyway. After five wrong tries the screen waits 30 seconds and explains how to reset a forgotten PIN: delete `.crosspoint/device_pin.bin` from the SD card on a computer. The card itself stays readable; the PIN guards this reader's screens, not the files.
+- Search on the BookOrbit Home: a Search button at the end of Home's title row (Up from the current book reaches it on the X3, X4 and X4 Classic) opens the Library straight on its search keyboard, and cancelling the keyboard goes back Home. A search now matches series names as well as titles and authors, and a search started from Recently Opened looks through the whole Library in title order, going back to Recently Opened when it is cleared. The Library shows "Search:" before the text being searched for.
+- New on your reader: a BookOrbit Home shelf listing the books Download New Books brought in that you have not opened yet, newest first, up to 8. A book leaves the shelf once you open it. Pick it for either Library shelf in Settings > BookOrbit Sync > Home.
+- Battery Use, in Settings > System > Device: how much battery the reader uses asleep (per day), awake (per hour) and for each sleep sync, measured from the battery level at each sleep and wake over about the last two weeks, plus how much the last sleep used. Time on USB is not counted, and the figures need the clock to be set.
+
+### Changed
+
+- On the X3, X4 and X4 Classic the Library's Right button now opens search directly. Its Settings and Rescan entries, which used to sit with Search in a Menu, are at the end of the Left button's sort list.
 
 ### Fixed
 
