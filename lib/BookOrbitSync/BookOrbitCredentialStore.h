@@ -2,6 +2,7 @@
 #include <ArduinoJson.h>
 #include <PersistableStore.h>
 
+#include <cstdint>
 #include <string>
 
 #include "BookOrbitHomeShelfSource.h"
@@ -40,6 +41,12 @@ class BookOrbitCredentialStore : public PersistableStore<BookOrbitCredentialStor
   std::string cfClientSecret;  // Cloudflare Access service token, Client Secret half
   BookOrbitSyncBehavior syncBehavior = BookOrbitSyncBehavior::ASK_EVERY_TIME;
   bool syncOnSleep = false;
+  // Download the books added to the server's Recently Added after the option was turned
+  // on, during the sleep sync. The watermark is the newest book taken so far, by date
+  // added (UTC epoch seconds) and then id; 0 means "set it from the server next run".
+  bool autoDownloadNew = false;
+  int64_t autoDownloadAfter = 0;
+  int64_t autoDownloadAfterId = 0;
   // Discover over Recently Added, the Library page before shelves could be chosen.
   BookOrbitHomeShelfSource homeShelves[HOME_SHELF_COUNT] = {{BookOrbitHomeShelfKind::DISCOVER, {}, {}},
                                                             {BookOrbitHomeShelfKind::RECENTLY_ADDED, {}, {}}};
@@ -88,6 +95,26 @@ class BookOrbitCredentialStore : public PersistableStore<BookOrbitCredentialStor
   bool getSyncOnSleep() const {
     ensureLoaded();
     return syncOnSleep;
+  }
+
+  // Sleep-sync downloads of newly added books (see BookOrbitAutoDownload).
+  bool getAutoDownloadNew() const {
+    ensureLoaded();
+    return autoDownloadNew;
+  }
+  int64_t getAutoDownloadAfter() const {
+    ensureLoaded();
+    return autoDownloadAfter;
+  }
+  int64_t getAutoDownloadAfterId() const {
+    ensureLoaded();
+    return autoDownloadAfterId;
+  }
+  void setAutoDownload(const bool enabled, const int64_t after, const int64_t afterId) {
+    ensureLoaded();
+    autoDownloadNew = enabled;
+    autoDownloadAfter = after;
+    autoDownloadAfterId = afterId;
   }
 
   // What a Library page shelf lists: index 0 is the top shelf. The Home snapshot only

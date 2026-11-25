@@ -61,12 +61,14 @@ inline constexpr std::array<StrId, CrossPointSettings::QUICK_ACTION_SLOT_ACTION_
 
 // Shared display order for shortcut pickers. The values remain the persisted
 // SHORT_PWRBTN IDs; only their presentation order is centralized here.
-inline constexpr std::array<CrossPointSettings::SHORT_PWRBTN, 33> shortcutActionOrder = {
+inline constexpr std::array<CrossPointSettings::SHORT_PWRBTN, 35> shortcutActionOrder = {
     CrossPointSettings::IGNORE,
     CrossPointSettings::SLEEP,
     CrossPointSettings::PAGE_TURN,
     CrossPointSettings::PREVIOUS_PAGE,
     CrossPointSettings::TOGGLE_BOOKMARK,
+    CrossPointSettings::PEEK_PAGE,
+    CrossPointSettings::SLEEP_AT_CHAPTER_END,
     CrossPointSettings::READING_STATS,
     CrossPointSettings::MARK_FINISHED,
     CrossPointSettings::FORCE_REFRESH,
@@ -113,6 +115,7 @@ inline bool isActionAvailable(const uint8_t action) {
     return true;
   if (action == CrossPointSettings::QUICK_ACTIONS || action == CrossPointSettings::QUICK_LOCK) return true;
   if (action == CrossPointSettings::BOOKORBIT_SYNC) return true;
+  if (action == CrossPointSettings::PEEK_PAGE || action == CrossPointSettings::SLEEP_AT_CHAPTER_END) return true;
   if (action == CrossPointSettings::TOGGLE_FRONTLIGHT) return Frontlight.present();
   if (action == CrossPointSettings::TOGGLE_TOUCHSCREEN) return gpio.hasTouch();
   if (action == CrossPointSettings::HOME_READER) return !gpio.hasTouch();
@@ -138,6 +141,8 @@ inline StrId actionLabel(const uint8_t action) {
   if (action == CrossPointSettings::TOGGLE_TOUCHSCREEN) return StrId::STR_TOGGLE_TOUCHSCREEN;
   if (action == CrossPointSettings::QUICK_LOCK) return StrId::STR_QUICK_LOCK;
   if (action == CrossPointSettings::BOOKORBIT_SYNC) return StrId::STR_BOOKORBIT_SYNC;
+  if (action == CrossPointSettings::PEEK_PAGE) return StrId::STR_PEEK_PAGE;
+  if (action == CrossPointSettings::SLEEP_AT_CHAPTER_END) return StrId::STR_SLEEP_AT_CHAPTER_END;
   if (action == CrossPointSettings::PREVIOUS_PAGE) return StrId::STR_PREV_PAGE;
   if (action == CrossPointSettings::NEARBY_POSITION_SYNC) return StrId::STR_NEARBY_POSITION_SYNC;
   if (action == CrossPointSettings::LIBRARY) return StrId::STR_LIBRARY;

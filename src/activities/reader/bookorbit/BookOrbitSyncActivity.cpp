@@ -21,6 +21,7 @@
 #include "BookOrbitDeviceScan.h"
 #include "BookOrbitDownloadIndex.h"
 #include "BookOrbitHomeStore.h"
+#include "BookOrbitRecentSync.h"
 #include "BookOrbitRemotePosition.h"
 #include "BookOrbitStatsUpload.h"
 #include "BookOrbitSyncMarkerFile.h"
@@ -43,8 +44,10 @@
 #include "components/UITheme.h"
 #include "components/themes/bookorbit/BookOrbitHomeLayout.h"
 #include "fontIds.h"
+#include "network/BookOrbitAutoDownload.h"
 #include "network/SavedWifiConnect.h"
 #include "util/BookContentId.h"
+#include "util/ProgressSaveTime.h"
 
 // This file mirrors src/activities/reader/KOReaderSyncActivity.cpp; see that file's
 // comments for the rationale behind the heap/TLS-related steps. Kept as a separate,
@@ -310,6 +313,27 @@ void BookOrbitSyncActivity::runSleepSync() {
     LOG_INF("BookOrbit", "Sleep sync skipped: no saved network answered");
   }
   syncSession.reset();
+#if CROSSINK_APP_RECENT_BOOKS_SYNC
+  // Then the other recent books' positions, on the same connection. A failed sync of the
+  // open book means the server or the account is unreachable: no point trying the rest.
+  if (wifiConnectedForSleepSync && state != SYNC_FAILED && !sleepSyncWakeRequested()) {
+    const BookOrbitRecentSync::Summary recent =
+        BookOrbitRecentSync::syncRecentBooks(renderer, epubPath, &sleepSyncWakeRequested);
+    LOG_INF("BookOrbit", "Recent books: %u checked, %u updated here, %u sent", static_cast<unsigned>(recent.checked),
+            static_cast<unsigned>(recent.applied), static_cast<unsigned>(recent.uploaded));
+  }
+#endif
+#if CROSSINK_APP_SLEEP_AUTO_DOWNLOAD
+  // Then the books added to the server since the last sleep, still on this connection and
+  // before the Home refresh, so its scan already counts them as on the device.
+  if (wifiConnectedForSleepSync && state != SYNC_FAILED && !sleepSyncWakeRequested()) {
+    const BookOrbitAutoDownload::Summary added = BookOrbitAutoDownload::run(&sleepSyncWakeRequested);
+    if (added.downloaded > 0 || added.cardFull) {
+      LOG_INF("BookOrbit", "New books: %u downloaded%s", static_cast<unsigned>(added.downloaded),
+              added.cardFull ? ", card nearly full" : "");
+    }
+  }
+#endif
   // The BookOrbit Home draws from what this boot's network leaves behind. Each step is
   // retried by the next sync, so a wake press can end it anywhere. Its tile dates the
   // snapshot as the last sync: a sync that failed for the book leaves it as it was, or
@@ -605,7 +629,15 @@ bool BookOrbitSyncActivity::decideAutomatically(const BookOrbitSmartSync::Positi
           local.spineIndex, local.pageNumber, remote.spineIndex, remote.pageNumber, remote.pageCount,
           (long long)remoteProgress.timestamp, (long long)lastSync.timestamp, (unsigned)lastSync.spineIndex,
           (unsigned)lastSync.pageNumber, (unsigned)lastSync.pageCount);
-  switch (BookOrbitSmartSync::decide(local, remote, remoteProgress.timestamp, lastSync)) {
+  // Nobody answers the sleep sync's questions: the most recently saved position wins there.
+  int64_t localSavedAt = 0;
+  if (sleepSync && ProgressSaveTime::load(epubPath, localSavedAt)) {
+    LOG_DBG("BookOrbit", "Newest save wins: local saved at %lld", (long long)localSavedAt);
+  }
+  const BookOrbitSmartSync::Decision decision =
+      sleepSync ? BookOrbitSmartSync::decideNewestSave(local, remote, remoteProgress.timestamp, lastSync, localSavedAt)
+                : BookOrbitSmartSync::decide(local, remote, remoteProgress.timestamp, lastSync);
+  switch (decision) {
     case BookOrbitSmartSync::Decision::AlreadySynced:
       // Both sides agree; refresh the marker so the next visit still knows
       // whether the server moved in the meantime.

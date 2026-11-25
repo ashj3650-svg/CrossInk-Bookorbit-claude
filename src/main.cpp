@@ -117,6 +117,7 @@ inline esp_sleep_wakeup_cause_t esp_sleep_get_wakeup_cause() { return ESP_SLEEP_
 #include "components/UITheme.h"
 #include "components/icons/tablerFilledIcons.h"
 #include "fontIds.h"
+#include "network/HomeWifi.h"
 #include "network/UsbSerialFileTransfer.h"
 #ifdef SIMULATOR
 #include <SimulatorLifecycle.h>
@@ -701,10 +702,11 @@ void notifyQuickLockChanged() {
     quickLockBadgeBackdrop.save(renderer, x, y);
     renderer.fillRect(x, y, QuickLockBadgeBackdrop::SIZE, QuickLockBadgeBackdrop::SIZE, background);
     freeink::ui::GfxRendererTarget target(renderer);
-    target.bitmap(freeink::ui::Rect{x + (QuickLockBadgeBackdrop::SIZE - icon_tabler_lock_28.w) / 2,
-                                    y + (QuickLockBadgeBackdrop::SIZE - icon_tabler_lock_28.h) / 2,
-                                    icon_tabler_lock_28.w, icon_tabler_lock_28.h},
-                  freeink::ui::bitmapFromIcon(icon_tabler_lock_28), freeink::ui::BitmapMode::Center,
+    const freeink::ui::Rect iconRect{
+        static_cast<int16_t>(x + (QuickLockBadgeBackdrop::SIZE - icon_tabler_lock_28.w) / 2),
+        static_cast<int16_t>(y + (QuickLockBadgeBackdrop::SIZE - icon_tabler_lock_28.h) / 2),
+        static_cast<int16_t>(icon_tabler_lock_28.w), static_cast<int16_t>(icon_tabler_lock_28.h)};
+    target.bitmap(iconRect, freeink::ui::bitmapFromIcon(icon_tabler_lock_28), freeink::ui::BitmapMode::Center,
                   freeink::ui::Paint::solid(foreground ? freeink::ui::Color::Black : freeink::ui::Color::White));
     renderer.displayBuffer(HalDisplay::FAST_REFRESH);
   } else {
@@ -1387,6 +1389,7 @@ void completeSleepAfterSleepSync() {
 // Enter deep sleep mode
 void enterDeepSleep(bool fromTimeout) {
   HalPowerManager::Lock powerLock;  // Ensure we are at normal CPU frequency for sleep preparation
+  HomeWifi::stop("going to sleep");
   APP_STATE.lastSleepFromReader = activityManager.isReaderActivity();
   // A long-press sleep fires while Power is still down (see BOOKORBIT_SLEEP_SYNC_PAYLOAD_POWER_HELD).
   const bool powerHeldAtSleep = gpio.isPressed(HalGPIO::BTN_POWER);
@@ -2256,6 +2259,7 @@ void loop() {
   mappedInputManager.clearDeferredHomeGesture();
 #endif
   const unsigned long activityDuration = millis() - activityStartTime;
+  HomeWifi::tick(activityManager.isHomeActivity(), millis() - lastActivityTime);
 
 #ifdef SIMULATOR
   runSimulatorSmokeTestTick();

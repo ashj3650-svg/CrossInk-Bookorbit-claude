@@ -756,6 +756,23 @@ whenever its timestamp is newer.
 A file shorter than 12 bytes, with another magic or with a timestamp of 0 or less, is no
 history at all: Smart sync then asks, and the sleep sync leaves the progress alone.
 
+## `last_read.bin`
+
+### Version 1
+
+`last_read.bin` records when the book was last read, in the book's content-keyed state
+directory (`/.crosspoint/book_<contentHash>/`). The reader writes it when a book opens,
+after reading the previous value, and again when the book closes. The "Previously..."
+recap card compares the stored time with the clock to decide whether you have been away
+long enough (Settings > Reader > Recap After Time Away). Nothing is written while the
+clock is not trusted (`WallClock::now` fails), so an unset clock never produces a
+bogus "away" time; the card is then skipped.
+
+Binary layout (8 bytes, little-endian):
+
+- `[0-3]` magic (`uint32_t` `0x424F4C52`)
+- `[4-7]` last-read time (`uint32_t`, UTC epoch seconds)
+
 ## `orphaned_clippings.bin`
 
 ### Version 1
@@ -782,6 +799,47 @@ Binary layout (all little-endian):
   - `[6-7]` `paragraphIndex` (`uint16_t`)
 
 A file whose magic or length does not match is ignored: no highlight is orphaned.
+
+## `peek.bin`
+
+### Version 1
+
+`peek.bin` holds the book's pinned Peek page (a map, a cast list), in the book's
+content-keyed state directory (`/.crosspoint/book_<contentHash>/`). It is written when a
+page is pinned from the reader menu or the Peek Page shortcut and deleted when it is
+unpinned. A page is stored the way bookmarks are, so it survives a font or layout change:
+the spine item, the paragraph the page starts with when known, and the position inside
+the spine item as a fraction.
+
+Binary layout (12 bytes, little-endian):
+
+- `[0-3]` magic (`uint32_t` `0x424F504B`)
+- `[4-5]` spine index (`uint16_t`)
+- `[6-7]` paragraph index (`uint16_t`, `0xFFFF` when unknown)
+- `[8-11]` progress within the spine item (`float`, 0 to 1)
+
+## `progress_time.bin`
+
+### Version 1
+
+`progress_time.bin` records when the book's reading position last moved on this device, in
+the book's content-keyed state directory (`/.crosspoint/book_<contentHash>/`). It is written
+by every progress save that changes the position (a new chapter, a different text offset,
+or a different page once scaled to the same page count), so reopening a book or laying it
+out again under another font does not count as a newer save. Nothing is written while the
+clock is not trusted. BookOrbit's unattended syncs (the sleep sync, its pass over the other
+recent books, and the sync when a book opens with Wi-Fi at Home) compare it with the
+server's progress date: the position saved most recently wins.
+
+The era lets a time recorded before an NTP sync be corrected for the drift that sync
+measured (`WallClock::correctionForEvent`), like the queued reading stats.
+
+Binary layout (12 bytes, little-endian):
+
+- `[0-3]` magic (`uint32_t` `0x424F5054`)
+- `[4-7]` save time (`uint32_t`, UTC epoch seconds by the device clock)
+- `[8-9]` clock era (`uint16_t`, `WallClock::era()` truncated)
+- `[10-11]` reserved, 0
 
 ## `replaced_chapters.bin`
 
@@ -1005,6 +1063,13 @@ The settings in `bookorbit.json` keep the chosen shelves as two strings, `homeSh
 Read, 3 collection or 4 SmartScope, and only a collection or SmartScope has an id and a
 name (`3:12:Science fiction`, `2::`). The name runs to the end of the string, so it may
 hold colons. A missing or unreadable value falls back to Discover over Recently Added.
+
+Download New Books keeps three more keys there: `autoDownloadNew` (the setting), and the
+newest book the sleep sync has taken so far, `autoDownloadAfter` (when it was added, UTC epoch
+seconds) and `autoDownloadAfterId` (its book id, for books added the same second). Turning the
+setting on sets `autoDownloadAfter` to the current time, or to 0 when the clock cannot be
+trusted, in which case the next sleep sync sets it to the newest book Recently Added lists
+and downloads nothing that time. Missing keys read as off.
 
 ## `/.crosspoint/wallclock.bin`
 

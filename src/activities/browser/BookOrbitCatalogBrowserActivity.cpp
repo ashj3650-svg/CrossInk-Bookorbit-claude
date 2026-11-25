@@ -10,15 +10,14 @@
 #include <Logging.h>
 #include <Memory.h>
 #include <WiFi.h>
-#include <ZipFile.h>
 
 #include <algorithm>
 #include <cctype>
+#include <cstdio>
 #include <iterator>
 #include <utility>
 
 #include "./BookOrbitCatalogListCache.h"
-#include "AppVersion.h"
 #include "BookOrbitCredentialStore.h"
 #include "BookOrbitDownloadIndex.h"
 #include "BookOrbitLocalBooks.h"
@@ -44,10 +43,9 @@
 #include "components/icons/bookOrbitIcons.h"
 #include "components/icons/libraryIcons.h"
 #include "fontIds.h"
+#include "network/BookOrbitBackgroundDownloads.h"
+#include "network/BookOrbitBookDownload.h"
 #include "network/HttpDownloader.h"
-#include "util/BookCacheUtils.h"
-#include "util/BookOrbitDevicePath.h"
-#include "util/BookUpdateMigration.h"
 
 namespace fui = freeink::ui;
 
@@ -156,16 +154,15 @@ bool isFacetSection(const std::string& id) {
   return id == "authors" || id == "series" || id == "collections" || id == "libraries" || id == "smart-scopes";
 }
 
-constexpr size_t BOOKORBIT_DOWNLOAD_BUFFER_SIZE = 2048;
 constexpr char READ_FOLDER_PREFIX[] = "/Read";
 constexpr int DOWNLOAD_PROGRESS_STEP_PERCENT = 5;
 constexpr unsigned long DOWNLOAD_PROGRESS_MIN_UPDATE_MS = 1000;
 constexpr unsigned long DOWNLOAD_PROGRESS_MAX_UPDATE_MS = 5000;
 // Hold threshold for the book action menu (firmware convention, as in Recent Books).
 constexpr unsigned long LONG_PRESS_MS = 1000;
-// Where HttpDownloader stages a download until it is complete and checked (see
-// DownloadFileSwap). Not ".epub", so a leftover never shows up as a book.
-constexpr char STAGED_DOWNLOAD_SUFFIX[] = ".part";
+// A background download's row repaints at most this often, and its notice stays this long.
+constexpr unsigned long DOWNLOAD_ROW_REPAINT_MS = 3000;
+constexpr unsigned long DOWNLOAD_NOTICE_MS = 2500;
 // Marker appended (right-aligned) to catalog rows whose book already exists on the
 // device. U+2022 bullet: guaranteed by the built-in fonts' default glyph intervals.
 constexpr char ON_DEVICE_MARKER[] = "\xE2\x80\xA2";
@@ -178,26 +175,9 @@ constexpr int MAX_WINDOW_PAGES = 2;
 // that would leave holes next to the TLS buffers.
 constexpr size_t WINDOW_ROWS = (MAX_WINDOW_PAGES + 1) * BookOrbitCatalogClient::PAGE_SIZE;
 
-// The SD filename (leading slash, no folder) this firmware falls back to when the
-// server does not say where the file belongs.
-std::string catalogBookFilename(const std::string& title, const std::string& author) {
-  return BookOrbitDevicePath::catalogFilename("", title, author);
-}
-
-// Where a catalog file belongs under the download folder, leading slash included.
-// BookOrbit resolves the account's KOReader file naming template (or this device's
-// override) and returns it as the file's devicePath, so a book lands where the same
-// account's KOReader devices put it — series folders and all. Servers that do not
-// send one keep the title-author name this fork always used.
-std::string catalogBookFilename(const BookOrbitBookDetail& detail, const BookOrbitCatalogFile& file) {
-  return BookOrbitDevicePath::catalogFilename(file.devicePath, detail.title, detail.author);
-}
-
-// The full SD path a catalog book downloads to: the configured download folder
-// ("" = SD root) plus the filename above.
-std::string catalogBookPath(const BookOrbitBookDetail& detail, const BookOrbitCatalogFile& file) {
-  return BOOKORBIT_STORE.getDownloadFolder() + catalogBookFilename(detail, file);
-}
+using BookOrbitBookDownload::catalogBookFilename;
+using BookOrbitBookDownload::catalogBookPath;
+using BookOrbitBookDownload::hasEpubFile;
 
 // True when the catalog book already exists locally, with its path in outPath. The download index knows
 // where past downloads landed, whatever the folder setting or the server's naming
@@ -233,17 +213,6 @@ std::string bookTitleFromPath(const std::string& path) {
   return path.substr(start, end - start);
 }
 
-bool hasEpubFile(const BookOrbitBookDetail& detail, BookOrbitCatalogFile& outFile) {
-  for (const auto& file : detail.files) {
-    std::string format = file.format;
-    std::transform(format.begin(), format.end(), format.begin(), [](unsigned char c) { return std::tolower(c); });
-    if (format == "epub") {
-      outFile = file;
-      return true;
-    }
-  }
-  return false;
-}
 }  // namespace
 
 BookOrbitCatalogBrowserActivity::BookOrbitCatalogBrowserActivity(GfxRenderer& renderer, MappedInputManager& mappedInput,
@@ -352,6 +321,13 @@ void BookOrbitCatalogBrowserActivity::onEnter() {
 
 void BookOrbitCatalogBrowserActivity::onExit() {
   Activity::onExit();
+#if CROSSINK_APP_BACKGROUND_DOWNLOADS
+  // Leaving by any other way than the catalog's own (which waits for them): the restart
+  // below would cut the downloads off mid-write, so they stop cleanly first, and the books
+  // that did arrive get their bookkeeping.
+  BookOrbitBackgroundDownloads::cancelAll();
+  collectFinishedDownloads(/*notify=*/false);
+#endif
   listOptions.reset();
   entries.clear();
   if (onDeviceListing) BookOrbitLocalBooks::clear();
@@ -1213,6 +1189,14 @@ void BookOrbitCatalogBrowserActivity::showDownloadScreen(const std::string& titl
 
 void BookOrbitCatalogBrowserActivity::downloadBook(const int64_t bookId, const std::string& title,
                                                    const std::string& replacePath, const bool openExisting) {
+#if CROSSINK_APP_BACKGROUND_DOWNLOADS
+  // From the listing, the book downloads behind it. A Home shelf book and a sync's update
+  // still show the screen: the session ends with that one book (Home, or the reader).
+  if (!downloadFromHome && reopenPath.empty()) {
+    queueDownload(bookId, replacePath, openExisting);
+    return;
+  }
+#endif
   showDownloadScreen(title);
 
   BookOrbitBookDetail detail;
@@ -1257,16 +1241,11 @@ void BookOrbitCatalogBrowserActivity::downloadBook(const int64_t bookId, const s
   // Create the download folder and, when the server's naming template nests the book
   // ("Sprawl/<book>.epub"), every folder it asks for. mkdir's pFlag creates the
   // missing parents in one call, so this covers both at once.
-  const size_t lastSlash = finalPath.find_last_of('/');
-  if (lastSlash > 0 && lastSlash != std::string::npos) {
-    const std::string folder = finalPath.substr(0, lastSlash);
-    if (!Storage.exists(folder.c_str()) && !Storage.mkdir(folder.c_str())) {
-      LOG_ERR("BookOrbit", "Could not create download folder %s", folder.c_str());
-      state = BrowserState::ERROR;
-      errorMessage = tr(STR_DOWNLOAD_FAILED);
-      requestUpdate();
-      return;
-    }
+  if (!BookOrbitBookDownload::ensureParentFolder(finalPath)) {
+    state = BrowserState::ERROR;
+    errorMessage = tr(STR_DOWNLOAD_FAILED);
+    requestUpdate();
+    return;
   }
 
   if (restartForDownload(bookId, epubFile.id, title, finalPath)) return;
@@ -1341,11 +1320,6 @@ void BookOrbitCatalogBrowserActivity::runPendingDownload(const bool wifiConnecte
 
 void BookOrbitCatalogBrowserActivity::transferBook(const int64_t bookId, const int64_t fileId,
                                                    const std::string& finalPath) {
-  // The heap the TLS session starts from: what tells a fragmented session from a
-  // clean download boot in a field log. The version says which build wrote that log.
-  LOG_INF("BookOrbit", "Downloading file %lld -> %s (free=%u maxAlloc=%u, firmware %s)", static_cast<long long>(fileId),
-          finalPath.c_str(), ESP.getFreeHeap(), ESP.getMaxAllocHeap(), AppVersion::version());
-
   bool cancelRequested = false;
   auto pollCancel = [this, &cancelRequested] {
     if (cancelRequested) return true;
@@ -1362,35 +1336,6 @@ void BookOrbitCatalogBrowserActivity::transferBook(const int64_t bookId, const i
     return cancelRequested;
   };
 
-  // A replacement a reset interrupted: this download would drop its old copy
-  // (DownloadFileSwap::recover), so the state that copy holds moves first.
-  if (BookUpdateMigration::pending(finalPath)) BookUpdateMigration::begin(finalPath, /*renderCacheIsOld=*/false);
-
-  HttpDownloader::DownloadOptions downloadOptions;
-  downloadOptions.shouldCancel = pollCancel;
-  downloadOptions.bufferSize = BOOKORBIT_DOWNLOAD_BUFFER_SIZE;
-  // TLS runs with a few KB of headroom on the C3 and reads can drop mid-transfer;
-  // keep the partial file and resume instead of restarting a multi-MB download.
-  downloadOptions.preservePartial = true;
-  // Small client RX buffer (see BookOrbitCatalogClient::fetchJson) so the
-  // headers-time body cache can't demand a large realloc next to the TLS buffers.
-  downloadOptions.clientRxBufferSize = 2048;
-  downloadOptions.largeBody = true;
-  // CrossInk v1.6.1's download safeguards, as its OPDS browser uses them: stage the file
-  // as "<book>.part", refuse a book the card cannot hold before writing any of it, and
-  // only put the file in place once it opens as an EPUB. A body cut short without a
-  // Content-Length, or an error page served as the file, used to land as the book.
-  downloadOptions.stageAsPart = true;
-  // A re-download's highlights, bookmarks and sync state are keyed by the old copy's content;
-  // it stays beside the new one until they have moved (see the OK branch below).
-  downloadOptions.keepReplaced = true;
-  downloadOptions.checkFreeSpace = true;
-  downloadOptions.validate = [](const std::string& path) {
-    ZipFile zip(path);
-    size_t size = 0;
-    return zip.getInflatedFileSize("META-INF/container.xml", &size) && size > 0;
-  };
-
   // Free the current listing while the download runs: every KB of contiguous heap
   // matters next to the TLS session, and the list is rebuilt from listQuery after.
   {
@@ -1399,68 +1344,34 @@ void BookOrbitCatalogBrowserActivity::transferBook(const int64_t bookId, const i
     listFreedForDownload = true;
   }
 
-  constexpr int MAX_DOWNLOAD_ATTEMPTS = 3;
-  HttpDownloader::DownloadError result = HttpDownloader::HTTP_ERROR;
   int lastRenderedPercent = -1;
   unsigned long lastProgressUpdateMs = 0;
   unsigned long now = 0;
   int percent = 0;
-  for (int attempt = 0; attempt < MAX_DOWNLOAD_ATTEMPTS; attempt++) {
-    // Honor a Back press between attempts too: a failing download otherwise runs
-    // all its retries (TLS handshake included) with the cancel request ignored.
-    if (pollCancel()) {
-      result = HttpDownloader::ABORTED;
-      break;
-    }
-    downloadOptions.resumePartial = attempt > 0;
-    result = BookOrbitCatalogClient::downloadFile(
-        fileId, finalPath,
-        [this, &lastRenderedPercent, &lastProgressUpdateMs, &percent, &now](const size_t downloaded,
-                                                                            const size_t total) {
-          downloadProgress = downloaded;
-          downloadTotal = total;
-          percent = total > 0 ? static_cast<int>(static_cast<uint64_t>(downloaded) * 100 / total) : 0;
-          now = millis();
-          // Throttle e-ink refreshes to meaningful progress steps: partial
-          // refreshes still wear the panel, and a raw byte-count callback fires
-          // far more often than the screen needs to redraw.
-          if (percent >= 100 || lastRenderedPercent < 0 ||
-              (percent >= lastRenderedPercent + DOWNLOAD_PROGRESS_STEP_PERCENT &&
-               now > DOWNLOAD_PROGRESS_MIN_UPDATE_MS) ||
-              now - lastProgressUpdateMs > DOWNLOAD_PROGRESS_MAX_UPDATE_MS) {
-            lastRenderedPercent = percent;
-            lastProgressUpdateMs = now;
-            requestUpdate(true);
-          }
-        },
-        &cancelRequested, downloadOptions);
-    // A full card will not have more room on the next attempt.
-    if (result == HttpDownloader::OK || result == HttpDownloader::ABORTED ||
-        result == HttpDownloader::INSUFFICIENT_SPACE) {
-      break;
-    }
-    LOG_ERR("BookOrbit", "Download attempt %d/%d failed (err=%d), retrying", attempt + 1, MAX_DOWNLOAD_ATTEMPTS,
-            static_cast<int>(result));
-  }
+  const HttpDownloader::DownloadError result = BookOrbitBookDownload::transfer(
+      bookId, fileId, finalPath,
+      [this, &lastRenderedPercent, &lastProgressUpdateMs, &percent, &now](const size_t downloaded, const size_t total) {
+        downloadProgress = downloaded;
+        downloadTotal = total;
+        percent = total > 0 ? static_cast<int>(static_cast<uint64_t>(downloaded) * 100 / total) : 0;
+        now = millis();
+        // Throttle e-ink refreshes to meaningful progress steps: partial refreshes still
+        // wear the panel, and a raw byte-count callback fires far more often than the
+        // screen needs to redraw.
+        if (percent >= 100 || lastRenderedPercent < 0 ||
+            (percent >= lastRenderedPercent + DOWNLOAD_PROGRESS_STEP_PERCENT &&
+             now > DOWNLOAD_PROGRESS_MIN_UPDATE_MS) ||
+            now - lastProgressUpdateMs > DOWNLOAD_PROGRESS_MAX_UPDATE_MS) {
+          lastRenderedPercent = percent;
+          lastProgressUpdateMs = now;
+          requestUpdate(true);
+        }
+      },
+      pollCancel, &cancelRequested);
 
   const bool downloadFailed = result != HttpDownloader::OK && result != HttpDownloader::ABORTED;
-  if (downloadFailed) {
-    // preservePartial kept the staged file for resuming between attempts; don't
-    // leave it behind once we give up.
-    Storage.remove((finalPath + STAGED_DOWNLOAD_SUFFIX).c_str());
-  }
-
   if (result == HttpDownloader::OK) {
-    // A copy it replaced hands its state to the new one; that also clears the render cache.
-    if (BookUpdateMigration::pending(finalPath)) {
-      BookUpdateMigration::begin(finalPath, /*renderCacheIsOld=*/true);
-    } else {
-      clearBookCache(finalPath);
-    }
-    BookOrbitDownloadIndex::record(bookId, finalPath);
-    // A new book, or new contents under a known path: the Library's index is stale, and On
-    // device is recounted by the next root.
-    library::invalidateLibraryIndex();
+    // On device is recounted by the next root.
     localOnDeviceCount = -1;
     if (!reopenPath.empty()) {
       openLocalBook(finalPath);
@@ -1504,10 +1415,15 @@ bool BookOrbitCatalogBrowserActivity::preventAutoSleep() {
     case BrowserState::LOADING:
     case BrowserState::DOWNLOADING:
     case BrowserState::SEARCH_INPUT:
+    case BrowserState::FINISHING_DOWNLOADS:
       return true;
     case BrowserState::BROWSING:
     case BrowserState::ERROR:
+#if CROSSINK_APP_BACKGROUND_DOWNLOADS
+      return BookOrbitBackgroundDownloads::busy();
+#else
       return false;
+#endif
   }
   return false;
 }
@@ -1571,6 +1487,10 @@ void BookOrbitCatalogBrowserActivity::activateSelected() {
     case EntryType::BOOK:
       if (entry.onDevice) {
         openLocalBook(entry.path);
+#if CROSSINK_APP_BACKGROUND_DOWNLOADS
+      } else if (BookOrbitBackgroundDownloads::progressOf(entry.bookId) >= 0) {
+        // Already on its way: the row shows how far.
+#endif
       } else {
         downloadBook(entry.bookId, entry.title, "", /*openExisting=*/true);
       }
@@ -1580,6 +1500,7 @@ void BookOrbitCatalogBrowserActivity::activateSelected() {
 
 void BookOrbitCatalogBrowserActivity::leaveCatalog() {
   if (reopenPath.empty()) {
+    if (deferLeaveForDownloads("")) return;
     onGoHome();
   } else {
     openLocalBook(reopenPath);
@@ -1587,6 +1508,7 @@ void BookOrbitCatalogBrowserActivity::leaveCatalog() {
 }
 
 void BookOrbitCatalogBrowserActivity::openLocalBook(const std::string& path) {
+  if (deferLeaveForDownloads(path)) return;
   // Pushing the reader here would never survive: onExit() reboots while the
   // radio is still up, so the reader is torn down before onEnter() records
   // the book. Persist the path and let the reboot land on it instead.
@@ -1685,6 +1607,9 @@ void BookOrbitCatalogBrowserActivity::navigateBack() {
 }
 
 void BookOrbitCatalogBrowserActivity::loop() {
+#if CROSSINK_APP_BACKGROUND_DOWNLOADS
+  pollBackgroundDownloads();
+#endif
   if (state == BrowserState::WIFI_SELECTION || state == BrowserState::SEARCH_INPUT) {
     return;
   }
@@ -1733,6 +1658,17 @@ void BookOrbitCatalogBrowserActivity::loop() {
   }
 
   if (state == BrowserState::DOWNLOADING) return;
+
+  if (state == BrowserState::FINISHING_DOWNLOADS) {
+#if CROSSINK_APP_BACKGROUND_DOWNLOADS
+    if (backRequested) BookOrbitBackgroundDownloads::cancelAll();
+    if (backRequested || !BookOrbitBackgroundDownloads::busy()) {
+      collectFinishedDownloads();
+      finishLeaving();
+    }
+#endif
+    return;
+  }
 
   if (state == BrowserState::BROWSING) {
     if (longPressFired) {
@@ -1926,6 +1862,12 @@ void BookOrbitCatalogBrowserActivity::buildListScreen(UiApp::ScreenType& screen)
   // the rows in memory, so its indices are those rows' own (row - windowStart).
   std::vector<fui::ListItem> items;
   items.reserve(entries.size());
+#if CROSSINK_APP_BACKGROUND_DOWNLOADS
+  // A book downloading behind the listing shows how far it got, "..." while it waits.
+  // Per render, for the rows in memory only, and only while something downloads.
+  const bool downloadsShown = BookOrbitBackgroundDownloads::busy();
+  std::vector<std::array<char, 6>> progressText(downloadsShown ? entries.size() : 0);
+#endif
   for (size_t i = 0; i < entries.size(); i++) {
     const auto& entry = entries[i];
     fui::ListItem item;
@@ -1934,6 +1876,17 @@ void BookOrbitCatalogBrowserActivity::buildListScreen(UiApp::ScreenType& screen)
     // are indistinguishable.
     if (!entry.subtitle.empty()) item.subtitle = entry.subtitle.c_str();
     if (entry.onDevice) item.value = ON_DEVICE_MARKER;
+#if CROSSINK_APP_BACKGROUND_DOWNLOADS
+    if (downloadsShown && entry.type == EntryType::BOOK) {
+      const int percent = BookOrbitBackgroundDownloads::progressOf(entry.bookId);
+      if (percent > 0) {
+        snprintf(progressText[i].data(), progressText[i].size(), "%d%%", percent);
+        item.value = progressText[i].data();
+      } else if (percent == 0) {
+        item.value = "...";
+      }
+    }
+#endif
     if (sections) item.sectionHeading = sectionHeading(i);
     item.actionValue = static_cast<int16_t>(i);
     items.push_back(item);
@@ -2035,9 +1988,11 @@ void BookOrbitCatalogBrowserActivity::render(RenderLock&&) {
 
   // WIFI_SELECTION: the Wi-Fi screen is only pushed on the next loop, and a network
   // boot paints the catalog before that, with no listing loaded yet.
-  if (state == BrowserState::CHECK_WIFI || state == BrowserState::LOADING || state == BrowserState::WIFI_SELECTION) {
+  if (state == BrowserState::CHECK_WIFI || state == BrowserState::LOADING || state == BrowserState::WIFI_SELECTION ||
+      state == BrowserState::FINISHING_DOWNLOADS) {
     renderer.drawCenteredText(UI_10_FONT_ID, pageHeight / 2, statusMessage.c_str());
-    const auto labels = mappedInput.mapLabels(tr(STR_BACK), "", "", "");
+    const bool finishing = state == BrowserState::FINISHING_DOWNLOADS;
+    const auto labels = mappedInput.mapLabels(finishing ? tr(STR_CANCEL) : tr(STR_BACK), "", "", "");
     GUI.drawButtonHints(renderer, labels.btn1, labels.btn2, labels.btn3, labels.btn4);
     renderer.displayBuffer();
     return;
@@ -2096,11 +2051,133 @@ void BookOrbitCatalogBrowserActivity::render(RenderLock&&) {
   if (listOptions && listOptions->processRender(renderer, mappedInput)) return;
 
   const Entry* selected = entryAt(selectorIndex);
-  const bool onRemoteBook = selected && selected->type == EntryType::BOOK && !selected->onDevice;
-  const char* confirmLabel = !selected ? "" : onRemoteBook ? tr(STR_DOWNLOAD) : tr(STR_OPEN);
+  bool onRemoteBook = selected && selected->type == EntryType::BOOK && !selected->onDevice;
+  bool onQueuedBook = false;
+#if CROSSINK_APP_BACKGROUND_DOWNLOADS
+  onQueuedBook = onRemoteBook && BookOrbitBackgroundDownloads::progressOf(selected->bookId) >= 0;
+#endif
+  const char* confirmLabel = !selected || onQueuedBook ? "" : onRemoteBook ? tr(STR_DOWNLOAD) : tr(STR_OPEN);
   const bool listButtons = listOptionsShown && !mappedInput.hasTouchHardware();
   const auto labels = mappedInput.mapLabels(tr(STR_BACK), confirmLabel, listButtons ? tr(STR_SORT) : "",
                                             listButtons ? tr(STR_BOOKORBIT_FILTER) : "");
   GUI.drawButtonHints(renderer, labels.btn1, labels.btn2, labels.btn3, labels.btn4);
+  // The popup pushes the frame itself.
+  if (!noticeMessage.empty()) {
+    GUI.drawPopup(renderer, noticeMessage.c_str());
+    return;
+  }
   renderer.displayBuffer();
 }
+
+void BookOrbitCatalogBrowserActivity::showNotice(const char* message) {
+  {
+    RenderLock lock(*this);
+    noticeMessage = message;
+  }
+  noticeUntilMs = millis() + DOWNLOAD_NOTICE_MS;
+  requestUpdate();
+}
+
+#if CROSSINK_APP_BACKGROUND_DOWNLOADS
+void BookOrbitCatalogBrowserActivity::queueDownload(const int64_t bookId, const std::string& replacePath,
+                                                    const bool takeExisting) {
+  if (BookOrbitBackgroundDownloads::progressOf(bookId) >= 0) return;
+  BookOrbitBackgroundDownloads::Request request;
+  request.bookId = bookId;
+  request.replacePath = replacePath;
+  request.takeExisting = takeExisting;
+  if (!BookOrbitBackgroundDownloads::enqueue(request)) {
+    showNotice(tr(STR_DOWNLOAD_QUEUE_FULL));
+    return;
+  }
+  requestUpdate();
+}
+
+void BookOrbitCatalogBrowserActivity::collectFinishedDownloads(const bool notify) {
+  BookOrbitBackgroundDownloads::Finished done;
+  while (BookOrbitBackgroundDownloads::takeFinished(done)) {
+    using BookOrbitBookDownload::Result;
+    const char* notice = nullptr;
+    bool onCard = false;
+    switch (done.result) {
+      case Result::Downloaded:
+        BookOrbitBookDownload::finishTransfer(done.bookId, done.path);
+        onCard = true;
+        notice = tr(STR_BOOK_DOWNLOADED);
+        break;
+      case Result::AlreadyOnCard:
+        BookOrbitDownloadIndex::record(done.bookId, done.path);
+        onCard = true;
+        break;
+      case Result::NoEpub:
+        notice = tr(STR_NO_EPUB_FORMAT);
+        break;
+      case Result::Unreachable:
+        notice = tr(STR_BOOKORBIT_CATALOG_ERROR);
+        break;
+      case Result::NoSpace:
+        notice = tr(STR_SD_CARD_FULL);
+        break;
+      case Result::Failed:
+        notice = tr(STR_DOWNLOAD_FAILED);
+        break;
+      case Result::Cancelled:
+        break;
+    }
+    if (onCard) {
+      localOnDeviceCount = -1;  // recounted by the next root
+      RenderLock lock(*this);
+      for (Entry& entry : entries) {
+        if (entry.type != EntryType::BOOK || entry.bookId != done.bookId) continue;
+        entry.onDevice = true;
+        entry.path = done.path;
+      }
+    }
+    if (notify && notice && state != BrowserState::FINISHING_DOWNLOADS) showNotice(notice);
+  }
+}
+
+void BookOrbitCatalogBrowserActivity::pollBackgroundDownloads() {
+  collectFinishedDownloads();
+  const unsigned long now = millis();
+  if (!noticeMessage.empty() && static_cast<long>(now - noticeUntilMs) >= 0) {
+    {
+      RenderLock lock(*this);
+      noticeMessage.clear();
+    }
+    requestUpdate();
+  }
+  const uint32_t changes = BookOrbitBackgroundDownloads::changeCount();
+  if (changes == seenDownloadChanges || state != BrowserState::BROWSING) return;
+  // A row's percent can wait for the next step; a book that starts or ends cannot, and
+  // collectFinishedDownloads() has already asked for that repaint.
+  if (now - lastDownloadRepaintMs < DOWNLOAD_ROW_REPAINT_MS && BookOrbitBackgroundDownloads::busy()) return;
+  seenDownloadChanges = changes;
+  lastDownloadRepaintMs = now;
+  requestUpdate();
+}
+
+bool BookOrbitCatalogBrowserActivity::deferLeaveForDownloads(const std::string& path) {
+  if (!BookOrbitBackgroundDownloads::busy()) return false;
+  LOG_INF("BookOrbit", "Leaving once the background downloads are done");
+  leavePath = path;
+  state = BrowserState::FINISHING_DOWNLOADS;
+  statusMessage = tr(STR_FINISHING_DOWNLOADS);
+  {
+    RenderLock lock(*this);
+    noticeMessage.clear();
+  }
+  requestUpdate(true);
+  return true;
+}
+
+void BookOrbitCatalogBrowserActivity::finishLeaving() {
+  if (leavePath.empty()) {
+    onGoHome();
+  } else {
+    openLocalBook(leavePath);
+  }
+}
+#else
+bool BookOrbitCatalogBrowserActivity::deferLeaveForDownloads(const std::string&) { return false; }
+#endif

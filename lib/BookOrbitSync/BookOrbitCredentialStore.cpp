@@ -59,6 +59,9 @@ void BookOrbitCredentialStore::toJson(JsonDocument& doc) const {
   doc["downloadFolder"] = downloadFolder;
   doc["syncBehavior"] = static_cast<uint8_t>(syncBehavior);
   doc["syncOnSleep"] = syncOnSleep;
+  doc["autoDownloadNew"] = autoDownloadNew;
+  doc["autoDownloadAfter"] = autoDownloadAfter;
+  doc["autoDownloadAfterId"] = autoDownloadAfterId;
   for (int i = 0; i < HOME_SHELF_COUNT; i++) {
     const BookOrbitHomeShelfSource& shelf = homeShelves[i];
     char value[sizeof(shelf.id) + sizeof(shelf.name) + 4];
@@ -90,6 +93,9 @@ bool BookOrbitCredentialStore::fromJson(JsonVariantConst doc) {
   syncBehavior = behavior == static_cast<uint8_t>(BookOrbitSyncBehavior::SMART) ? BookOrbitSyncBehavior::SMART
                                                                                 : BookOrbitSyncBehavior::ASK_EVERY_TIME;
   syncOnSleep = doc["syncOnSleep"] | false;
+  autoDownloadNew = doc["autoDownloadNew"] | false;
+  autoDownloadAfter = doc["autoDownloadAfter"] | static_cast<int64_t>(0);
+  autoDownloadAfterId = doc["autoDownloadAfterId"] | static_cast<int64_t>(0);
 
   // A missing or unreadable shelf is the one the Home had before shelves could be chosen.
   for (int i = 0; i < HOME_SHELF_COUNT; i++) {

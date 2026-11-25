@@ -22,6 +22,7 @@
 #include "FootnoteLinkTargets.h"
 #include "GlobalReadingStats.h"
 #include "ManualPageTurnQueue.h"
+#include "PeekPageStore.h"
 #include "ReaderProgressSaveDebouncer.h"
 #include "SideButtonShortcuts.h"
 #include "activities/Activity.h"
@@ -233,6 +234,36 @@ class EpubReaderActivity final : public Activity {
     Removed,
     LimitReached,
   };
+  // Sleep at Chapter End: chapter ends left before the device sleeps (0 = off). Lives for
+  // the reading session only, like a bedtime timer.
+  uint8_t chapterEndSleepChapters = 0;
+  static constexpr uint8_t MAX_CHAPTER_END_SLEEP_CHAPTERS = 3;
+  bool isChapterBoundaryAfter(int spineIndex) const;
+  // Peek page: the book's pinned page, and while it is up, the page to return to.
+  bool hasPeekPage = false;
+  PeekPageStore::Place peekPage;
+  bool peekActive = false;
+  int peekReturnSpine = 0;
+  int peekReturnPage = 0;
+  int peekPagesTurned = 0;
+  static constexpr int MAX_PEEK_PAGE_TURNS = 10;
+  // Caller must own RenderLock: reads section.
+  bool currentPageIsPeek() const;
+  void togglePeekPagePin();
+  void handlePeekShortcut();
+  void goToPeekPage();
+  void returnFromPeekPage();
+  void endPeekWithoutReturn(const char* reason);
+  // A one-line confirmation over the page, dismissed like the bookmark one.
+  bool pendingReaderToast = false;
+  unsigned long readerToastShowTime = 0UL;
+  char readerToastText[64] = {};
+  void showReaderToast(const char* text);
+  // The Previously card waits for the first page to be on screen, then opens over it.
+  bool recapPending = false;
+  uint32_t recapDaysAway = 0;
+  static constexpr int RECAP_QUOTE_LINES = 5;
+  void showRecapCard();
   bool pendingBookmarkFeedback = false;
   BookmarkFeedbackType bookmarkFeedbackType = BookmarkFeedbackType::Added;
   unsigned long bookmarkFeedbackShowTime = 0UL;

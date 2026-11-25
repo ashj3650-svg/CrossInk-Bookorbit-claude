@@ -27,12 +27,21 @@
 #include "components/UiAppHelpers.h"
 #include "components/themes/bookorbit/BookOrbitHomeText.h"
 #include "fontIds.h"
+#include "network/BookOrbitAutoDownload.h"
 #include "network/SavedWifiConnect.h"
 
 namespace fui = freeink::ui;
 
 namespace {
-constexpr int MENU_ITEMS = 9;
+constexpr int SYNC_ON_SLEEP_ROW = 7;
+#if CROSSINK_APP_SLEEP_AUTO_DOWNLOAD
+constexpr int AUTO_DOWNLOAD_ROW = 8;
+constexpr int HOME_ROW = 9;
+#else
+constexpr int AUTO_DOWNLOAD_ROW = -1;
+constexpr int HOME_ROW = 8;
+#endif
+constexpr int MENU_ITEMS = HOME_ROW + 1;
 // The folder row reuses the OPDS strings: "Download Folder" and "SD Root" are
 // generic and already translated in every language file.
 const StrId menuNames[MENU_ITEMS] = {StrId::STR_USERNAME,
@@ -43,8 +52,10 @@ const StrId menuNames[MENU_ITEMS] = {StrId::STR_USERNAME,
                                      StrId::STR_OPDS_DOWNLOAD_FOLDER,
                                      StrId::STR_SYNC_BEHAVIOR,
                                      StrId::STR_BOOKORBIT_SYNC_ON_SLEEP,
+#if CROSSINK_APP_SLEEP_AUTO_DOWNLOAD
+                                     StrId::STR_BOOKORBIT_AUTO_DOWNLOAD,
+#endif
                                      StrId::STR_HOME};
-constexpr int HOME_ROW = 8;
 // The Home page: the top shelf, the bottom shelf, then the refresh.
 constexpr int HOME_ITEMS = 3;
 constexpr int REFRESH_ROW = 2;
@@ -246,9 +257,12 @@ void BookOrbitSettingsActivity::handleSelection() {
                                         : BookOrbitSyncBehavior::ASK_EVERY_TIME);
     BOOKORBIT_STORE.saveToFile();
     requestUpdate();
-  } else if (selectedIndex == 7) {
+  } else if (selectedIndex == SYNC_ON_SLEEP_ROW) {
     BOOKORBIT_STORE.setSyncOnSleep(!BOOKORBIT_STORE.getSyncOnSleep());
     BOOKORBIT_STORE.saveToFile();
+    requestUpdate();
+  } else if (static_cast<int>(selectedIndex) == AUTO_DOWNLOAD_ROW) {
+    BookOrbitAutoDownload::setEnabled(!BOOKORBIT_STORE.getAutoDownloadNew());
     requestUpdate();
   } else if (selectedIndex == HOME_ROW) {
     startActivityForResult(std::make_unique<BookOrbitSettingsActivity>(renderer, mappedInput, Page::Home),
@@ -388,8 +402,10 @@ void BookOrbitSettingsActivity::buildListScreen(UiApp::ScreenType& screen) {
     } else if (i == 6) {
       values[i] = BOOKORBIT_STORE.getSyncBehavior() == BookOrbitSyncBehavior::SMART ? tr(STR_SMART_SYNC)
                                                                                     : tr(STR_ASK_EVERY_TIME);
-    } else if (i == 7) {
+    } else if (i == SYNC_ON_SLEEP_ROW) {
       values[i] = BOOKORBIT_STORE.getSyncOnSleep() ? tr(STR_STATE_ON) : tr(STR_STATE_OFF);
+    } else if (i == AUTO_DOWNLOAD_ROW) {
+      values[i] = BOOKORBIT_STORE.getAutoDownloadNew() ? tr(STR_STATE_ON) : tr(STR_STATE_OFF);
     } else if (i == HOME_ROW) {
       // A page of its own: no value.
     } else {

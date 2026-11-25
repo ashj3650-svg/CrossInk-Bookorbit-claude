@@ -241,6 +241,13 @@ class CrossPointSettings : public PersistableStore<CrossPointSettings> {
   };
 
   // Short power button press actions
+  // How long a book must have gone unread before reopening it shows the "Previously..."
+  // recap card. Persisted: append only.
+  enum RECAP_AFTER_AWAY { RECAP_OFF = 0, RECAP_AFTER_1_DAY = 1, RECAP_AFTER_3_DAYS = 2, RECAP_AFTER_1_WEEK = 3 };
+  static constexpr uint32_t recapMinDays(const uint8_t setting) {
+    return setting == RECAP_AFTER_1_DAY ? 1 : setting == RECAP_AFTER_3_DAYS ? 3 : setting == RECAP_AFTER_1_WEEK ? 7 : 0;
+  }
+
   enum SHORT_PWRBTN {
     IGNORE = 0,
     SLEEP = 1,
@@ -288,6 +295,10 @@ class CrossPointSettings : public PersistableStore<CrossPointSettings> {
     // migrateBookOrbitShortcutValues() carries saved shortcuts over: it was 33 up to
     // v1.6.0+bookorbit.2, which CrossInk v1.6.1 persists as LIBRARY.
     BOOKORBIT_SYNC = 37,
+    // This fork's reader actions: jump to the book's Peek page and back, and cycle the
+    // chapter-end sleep timer.
+    PEEK_PAGE = 38,
+    SLEEP_AT_CHAPTER_END = 39,
     SHORT_PWRBTN_COUNT
   };
 
@@ -426,6 +437,8 @@ class CrossPointSettings : public PersistableStore<CrossPointSettings> {
     // This fork's own action, kept last like BOOKORBIT_SYNC above (24 up to
     // v1.6.0+bookorbit.2, now LONG_MENU_LIBRARY).
     LONG_MENU_BOOKORBIT_SYNC = 25,
+    LONG_MENU_PEEK_PAGE = 26,
+    LONG_MENU_SLEEP_AT_CHAPTER_END = 27,
     LONG_PRESS_MENU_ACTION_COUNT
   };
 
@@ -499,6 +512,9 @@ class CrossPointSettings : public PersistableStore<CrossPointSettings> {
   // for a clock that survives sleep, and boards with a real RTC (X3) do not need it.
   // See HalPowerManager::startDeepSleep.
   uint8_t keepClockInSleep = 0;
+  // Wi-Fi at Home (HomeWifi): join a saved network in the background while Home shows.
+  // Boards without PSRAM never offer it.
+  uint8_t wifiAtHome = 1;
   // Let Check for Updates offer this fork's release candidates (GitHub pre-releases) as well
   // as its final releases. Off by default: candidates are test builds.
   uint8_t otaIncludePrereleases = 0;
@@ -666,6 +682,8 @@ class CrossPointSettings : public PersistableStore<CrossPointSettings> {
   uint8_t fileBrowserDisplay = FILE_BROWSER_DISPLAY_1_LINE;
   // Remove a book from the Recent Books list when its End-of-Book screen is reached (0 = off, 1 = on)
   uint8_t removeReadBooksFromRecents = 0;
+  // Reopening a book after this long away shows the "Previously..." recap (RECAP_AFTER_AWAY).
+  uint8_t recapAfterAway = RECAP_AFTER_3_DAYS;
   // Move epub to /Read/ folder on SD card when marked as finished (0 = disabled, 1 = enabled)
   uint8_t moveFinishedToReadFolder = 0;
   // Automatically write a dated global reading-stats backup before sleep when an RTC is available (0 = off, 1 = on).

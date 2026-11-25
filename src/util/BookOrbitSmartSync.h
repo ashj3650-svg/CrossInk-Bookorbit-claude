@@ -149,4 +149,18 @@ constexpr Decision decide(const Position& local, const Position& remote, const i
   return Decision::AskConflict;
 }
 
+// The syncs nobody watches (behind the sleep screen, for the other recent books, and as
+// a book opens with Wi-Fi up) settle every difference themselves: the position saved most
+// recently wins. `localSavedAt` is when this device's position last moved
+// (ProgressSaveTime), 0 when unknown. A server date that only changed because BookOrbit's
+// web reader opened the book (onlyRedated()) is no newer save. Without both dates the
+// marker rules of decide() apply, and their questions stay for a person.
+constexpr Decision decideNewestSave(const Position& local, const Position& remote, const int64_t remoteTimestamp,
+                                    const Marker& marker, const int64_t localSavedAt) {
+  if (samePlace(local, remote)) return Decision::AlreadySynced;
+  if (localSavedAt <= 0 || remoteTimestamp <= 0) return decide(local, remote, remoteTimestamp, marker);
+  const bool serverNewer = remoteTimestamp > localSavedAt && !onlyRedated(remote, marker);
+  return serverNewer ? Decision::ApplyRemote : Decision::UploadLocal;
+}
+
 }  // namespace BookOrbitSmartSync

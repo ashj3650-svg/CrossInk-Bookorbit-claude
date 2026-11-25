@@ -60,10 +60,12 @@
 #include "MappedInputManager.h"
 #include "NearbyBookPositionSyncActivity.h"
 #include "PageWordGeometry.h"
+#include "PeekPageStore.h"
 #include "ProgressMapper.h"
 #include "QrDisplayActivity.h"
 #include "QuickActions.h"
 #include "ReaderFontLoading.h"
+#include "ReaderRecapActivity.h"
 #include "ReaderUtils.h"
 #include "ReadingSessionStats.h"
 #include "RecentBooksStore.h"
@@ -89,6 +91,7 @@
 #include "util/BookContentId.h"
 #include "util/BookMoveUtils.h"
 #include "util/Dictionary.h"
+#include "util/LastReadStamp.h"
 #include "util/ScreenshotUtil.h"
 
 namespace {
@@ -1214,6 +1217,34 @@ void buildBookmarkSnippet(const Page& page, char* out, const size_t outSize) {
       out[len] = '\0';
     }
   }
+}
+
+// The last lines of a page as running text, for the Previously card: words joined by
+// spaces, a hyphen the layout added at a line break dropped and the word rejoined.
+std::string buildRecapTail(const Page& page, const int maxLines) {
+  std::vector<const TextBlock*> lines;
+  lines.reserve(maxLines);
+  for (auto it = page.elements.rbegin(); it != page.elements.rend() && static_cast<int>(lines.size()) < maxLines;
+       ++it) {
+    if ((*it)->getTag() != TAG_PageLine) continue;
+    const auto& line = static_cast<const PageLine&>(**it);
+    if (line.getBlock()) lines.push_back(line.getBlock().get());
+  }
+  std::string text;
+  bool joinNext = false;
+  for (auto it = lines.rbegin(); it != lines.rend(); ++it) {
+    const TextBlock& block = **it;
+    for (uint16_t i = 0; i < block.wordCount(); ++i) {
+      const char* word = block.wordText(i);
+      if (isSnippetWhitespace(word)) continue;
+      size_t wordLen = std::strlen(word);
+      if (!text.empty() && !joinNext) text += ' ';
+      joinNext = block.wordEndsWithInsertedHyphen(i);
+      if (joinNext && wordLen > 0 && word[wordLen - 1] == '-') --wordLen;
+      text.append(word, wordLen);
+    }
+  }
+  return text;
 }
 
 uint16_t clampAutoPageTurnIntervalSeconds(const uint16_t seconds) {
@@ -2557,6 +2588,8 @@ void EpubReaderActivity::onEnter() {
 
   BOOKMARKS.loadForBook(epub->getPath(), epub->getTitle(), epub->getAuthor(), "epub");
   CLIPPINGS.loadForBook(epub->getPath(), epub->getTitle(), epub->getAuthor(), "epub");
+  hasPeekPage = PeekPageStore::load(epub->getPath(), peekPage) &&
+                static_cast<int>(peekPage.spineIndex) < epub->getSpineItemsCount();
 
   uint16_t restartPageBuildSpine = UINT16_MAX;
   uint16_t restartPageBuildTarget = 0;
@@ -2674,6 +2707,21 @@ void EpubReaderActivity::onEnter() {
                                  coverState);
   }
 
+  // A book left alone for days opens on the Previously card. Not after a jump to a
+  // bookmark or clipping, nor when a silent restart resumes a page build. The stamp is
+  // read before this session's own is written, so a restart mid-session (a sync's network
+  // boot skips onExit()) finds a fresh one and shows no card.
+  if (!resumePageBuildAfterRestart && !pendingPercentJump) {
+    const uint32_t minDays = CrossPointSettings::recapMinDays(SETTINGS.recapAfterAway);
+    uint32_t lastRead = 0;
+    uint32_t now = 0;
+    if (minDays > 0 && LastReadStamp::load(epub->getPath(), lastRead) && WallClock::now(now)) {
+      recapDaysAway = LastReadStamp::daysBetween(lastRead, now);
+      recapPending = recapDaysAway >= minDays;
+    }
+  }
+  LastReadStamp::save(epub->getPath());
+
   // Trigger first update
   requestUpdate();
 }
@@ -2718,6 +2766,7 @@ void EpubReaderActivity::onExit() {
     // Reading sessions are the natural "last known good time" checkpoints for the
     // boot-time clock restore on RTC-less devices.
     WallClock::checkpoint();
+    LastReadStamp::save(epub->getPath());
   }
 
   BOOKMARKS.unload();
@@ -2816,6 +2865,10 @@ void EpubReaderActivity::openReaderMenu() {
       endGlobalSettingsEditForBookReader, this, bookSettings.dictionarySdFontFamilyName,
       bookSettings.dictionaryFontPointSize, bookSettings.hasDictionaryFontOverride, saveDictionaryFontForBookReader,
       this, touchReaderDrawerState, std::move(buttonPreviewModel));
+  if (menuActivity) {
+    RenderLock lock(*this);
+    menuActivity->setReadingAids(chapterEndSleepChapters, hasPeekPage, !previewActive && currentPageIsPeek());
+  }
   if (!menuActivity) {
     LOG_ERR("ERS", "Could not allocate reader drawer");
     resumeReadingPaceTimer("reader_menu_oom");
@@ -2828,6 +2881,8 @@ void EpubReaderActivity::openReaderMenu() {
     LOG_DBG("ERDM", "Button drawer returned: free=%u maxAlloc=%u", heapAfterMenu.freeHeap, heapAfterMenu.maxAllocHeap);
 #endif
     if (const auto* chapter = std::get_if<ChapterResult>(&result.data)) {
+      // A jump elsewhere ends a peek: from here on this is reading again.
+      endPeekWithoutReturn("chapter_jump");
       touchReaderDrawerState = chapter->drawerState;
       applyOrientation(chapter->orientation);
       if (chapter->settingsChanged) {
@@ -3177,6 +3232,18 @@ void EpubReaderActivity::loop() {
     return;
   }
 
+  if (recapPending && lastRenderCompleteMs != 0 && !RenderLock::peek()) {
+    recapPending = false;
+    showRecapCard();
+    return;
+  }
+
+  if (pendingReaderToast && transientFeedbackDismissed(readerToastShowTime)) {
+    pendingReaderToast = false;
+    requestUpdate();
+    return;
+  }
+
   if (pendingBookmarkFeedback && transientFeedbackDismissed(bookmarkFeedbackShowTime)) {
     pendingBookmarkFeedback = false;
     requestUpdate();
@@ -3384,6 +3451,10 @@ void EpubReaderActivity::loop() {
   // Short press BACK goes directly to home (or restores position if viewing footnote)
   if (!touch.prev && !touch.next && mappedInput.wasReleased(MappedInputManager::Button::Back) &&
       mappedInput.getHeldTime() < ReaderUtils::GO_HOME_MS) {
+    if (peekActive) {
+      returnFromPeekPage();
+      return;
+    }
     if (footnoteDepth > 0) {
       restoreSavedPosition();
       return;
@@ -3995,6 +4066,40 @@ void EpubReaderActivity::openWordSelect(bool framebufferContainsPage, int initia
 void EpubReaderActivity::onReaderMenuConfirm(EpubReaderMenuAction action, const bool returnToReaderMenu,
                                              const PendingOverlayResume* replacementResume) {
   switch (action) {
+    case EpubReaderMenuAction::GO_TO_PERCENT:
+    case EpubReaderMenuAction::GO_TO_STABLE_PAGE:
+    case EpubReaderMenuAction::VIEW_BOOKMARKS:
+    case EpubReaderMenuAction::VIEW_CLIPPINGS:
+    case EpubReaderMenuAction::SELECT_CHAPTER:
+      // These take the reader elsewhere: a peek in progress becomes reading.
+      endPeekWithoutReturn("menu_navigation");
+      break;
+    default:
+      break;
+  }
+  switch (action) {
+    case EpubReaderMenuAction::SLEEP_AT_CHAPTER_END: {
+      chapterEndSleepChapters =
+          chapterEndSleepChapters >= MAX_CHAPTER_END_SLEEP_CHAPTERS ? 0 : chapterEndSleepChapters + 1;
+      LOG_INF("ERS", "Sleep at chapter end: %u chapters", static_cast<unsigned>(chapterEndSleepChapters));
+      char text[sizeof(readerToastText)];
+      if (chapterEndSleepChapters == 0) {
+        snprintf(text, sizeof(text), "%s", tr(STR_CHAPTER_END_SLEEP_OFF));
+      } else if (chapterEndSleepChapters == 1) {
+        snprintf(text, sizeof(text), "%s", tr(STR_SLEEP_AFTER_THIS_CHAPTER));
+      } else {
+        snprintf(text, sizeof(text), tr(STR_SLEEP_AFTER_CHAPTERS_FORMAT),
+                 static_cast<unsigned>(chapterEndSleepChapters));
+      }
+      showReaderToast(text);
+      break;
+    }
+    case EpubReaderMenuAction::PIN_PEEK_PAGE:
+      togglePeekPagePin();
+      break;
+    case EpubReaderMenuAction::GO_TO_PEEK_PAGE:
+      goToPeekPage();
+      break;
     case EpubReaderMenuAction::STATUS_BAR_SETTINGS: {
       auto statusBar = makeUniqueNoThrow<StatusBarSettingsActivity>(renderer, mappedInput, true,
                                                                     epub && epub->getReferencePageCount() > 0);
@@ -5308,6 +5413,172 @@ void EpubReaderActivity::resetReadingPaceData() {
 #endif
 }
 
+void EpubReaderActivity::showReaderToast(const char* text) {
+  snprintf(readerToastText, sizeof(readerToastText), "%s", text);
+  pendingReaderToast = true;
+  readerToastShowTime = millis();
+  requestUpdate();
+}
+
+bool EpubReaderActivity::isChapterBoundaryAfter(const int spineIndex) const {
+  const int next = spineIndex + 1;
+  if (next >= epub->getSpineItemsCount()) return true;
+  // Spine files without a TOC entry of their own carry the previous entry's index, so a
+  // chapter split over several files ends only where the index changes. A book without
+  // a TOC has -1 throughout: each spine file is then a chapter.
+  const int tocHere = epub->getTocIndexForSpineIndex(spineIndex);
+  const int tocNext = epub->getTocIndexForSpineIndex(next);
+  return tocHere < 0 || tocHere != tocNext;
+}
+
+bool EpubReaderActivity::currentPageIsPeek() const {
+  if (!hasPeekPage || !section || currentSpineIndex != static_cast<int>(peekPage.spineIndex)) return false;
+  const uint16_t pageCount = static_cast<uint16_t>(section->estimatedTotalPages());
+  if (pageCount == 0) return false;
+  return pageFromStoredProgress(peekPage.progress, pageCount) == section->currentPage;
+}
+
+void EpubReaderActivity::togglePeekPagePin() {
+  bool onPeek = false;
+  PeekPageStore::Place place;
+  {
+    RenderLock lock(*this);
+    if (activeFootnotePreview || !section || section->pageCount == 0) return;
+    onPeek = currentPageIsPeek();
+    if (!onPeek) {
+      const uint16_t pageCount = static_cast<uint16_t>(section->estimatedTotalPages());
+      place.spineIndex = static_cast<uint16_t>(currentSpineIndex);
+      place.progress = pageCount > 0 ? static_cast<float>(section->currentPage) / static_cast<float>(pageCount) : 0.0f;
+      if (const auto paragraph = section->getParagraphIndexForPage(static_cast<uint16_t>(section->currentPage))) {
+        place.paragraphIndex = *paragraph;
+      }
+    }
+  }
+  if (onPeek) {
+    if (!PeekPageStore::remove(epub->getPath())) {
+      LOG_ERR("ERS", "Could not unpin the Peek page");
+      return;
+    }
+    hasPeekPage = false;
+    peekActive = false;
+    showReaderToast(tr(STR_PEEK_PAGE_UNPINNED));
+    return;
+  }
+  if (!PeekPageStore::save(epub->getPath(), place)) {
+    showReaderToast(tr(STR_SAVE_PROGRESS_FAILED));
+    return;
+  }
+  peekPage = place;
+  hasPeekPage = true;
+  LOG_INF("ERS", "Peek page pinned: spine=%u progress=%.3f", place.spineIndex, static_cast<double>(place.progress));
+  showReaderToast(tr(STR_PEEK_PAGE_PINNED));
+}
+
+void EpubReaderActivity::handlePeekShortcut() {
+  if (peekActive) {
+    returnFromPeekPage();
+  } else if (!hasPeekPage) {
+    // The first press pins the page on screen; later presses jump to it and back.
+    togglePeekPagePin();
+  } else {
+    goToPeekPage();
+  }
+}
+
+void EpubReaderActivity::goToPeekPage() {
+  if (!hasPeekPage || peekActive || activeFootnotePreview || !section) return;
+  clearPendingManualPageTurns();
+  {
+    RenderLock lock(*this);
+    if (currentPageIsPeek()) return;
+    // Settle the place being read first: progress is not saved again until the return.
+    if (section->pageCount > 0) {
+      queueProgressSave(currentSpineIndex, section->currentPage, section->pageCount, /*forceSave=*/true);
+    }
+    peekReturnSpine = currentSpineIndex;
+    peekReturnPage = section->currentPage;
+    peekActive = true;
+    peekPagesTurned = 0;
+    clearFootnotePreviewState();
+    if (currentSpineIndex == static_cast<int>(peekPage.spineIndex)) {
+      const uint16_t fallbackPage =
+          pageFromStoredProgress(peekPage.progress, static_cast<uint16_t>(section->estimatedTotalPages()));
+      section->currentPage = peekPage.paragraphIndex != UINT16_MAX
+                                 ? resolveParagraphJumpPage(*section, peekPage.paragraphIndex, fallbackPage)
+                                 : fallbackPage;
+      nextPageNumber = section->currentPage;
+    } else {
+      currentSpineIndex = peekPage.spineIndex;
+      pendingSpineProgress = peekPage.progress;
+      pendingParagraphIndex = peekPage.paragraphIndex;
+      pendingPercentJump = true;
+      section.reset();
+    }
+  }
+  LOG_INF("ERS", "Peeking: spine=%u, will return to spine=%d page=%d", peekPage.spineIndex, peekReturnSpine,
+          peekReturnPage);
+  armReadingPaceWarmup("peek_jump");
+  requestUpdate();
+}
+
+void EpubReaderActivity::returnFromPeekPage() {
+  if (!peekActive) return;
+  clearPendingManualPageTurns();
+  {
+    RenderLock lock(*this);
+    peekActive = false;
+    clearFootnotePreviewState();
+    pendingPercentJump = false;
+    pendingParagraphIndex = UINT16_MAX;
+    if (section && currentSpineIndex == peekReturnSpine) {
+      section->currentPage = std::min(peekReturnPage, std::max(0, static_cast<int>(section->pageCount) - 1));
+      nextPageNumber = section->currentPage;
+    } else {
+      currentSpineIndex = peekReturnSpine;
+      nextPageNumber = peekReturnPage;
+      section.reset();
+    }
+  }
+  LOG_INF("ERS", "Back from the Peek page: spine=%d page=%d", peekReturnSpine, peekReturnPage);
+  armReadingPaceWarmup("peek_return");
+  requestUpdate();
+}
+
+void EpubReaderActivity::endPeekWithoutReturn(const char* reason) {
+  if (!peekActive) return;
+  peekActive = false;
+  LOG_INF("ERS", "Peek ended without a return (%s)", reason);
+}
+
+void EpubReaderActivity::showRecapCard() {
+  std::string chapterTitle;
+  std::string lastLines;
+  {
+    RenderLock lock(*this);
+    const int tocIndex = epub->getTocIndexForSpineIndex(currentSpineIndex);
+    if (tocIndex >= 0) chapterTitle = epub->getTocItem(tocIndex).title;
+    // The quote is the end of the page before the one the book reopens at. On a
+    // chapter's first page there is none in reach, and the card goes without it.
+    if (section && !activeFootnotePreview && section->currentPage > 0) {
+      if (auto page = section->loadPage(section->currentPage - 1)) {
+        lastLines = buildRecapTail(*page, RECAP_QUOTE_LINES);
+      }
+    }
+  }
+  auto recap = makeUniqueNoThrow<ReaderRecapActivity>(renderer, mappedInput, epub->getTitle(), std::move(chapterTitle),
+                                                      recapDaysAway, std::move(lastLines));
+  if (!recap) {
+    LOG_ERR("ERS", "Could not allocate the Previously card");
+    return;
+  }
+  LOG_INF("ERS", "Showing the Previously card after %u days away", static_cast<unsigned>(recapDaysAway));
+  pauseReadingPaceTimer("recap_card");
+  startActivityForResult(std::move(recap), [this](const ActivityResult&) {
+    resumeReadingPaceTimer("recap_card_return");
+    requestUpdate();
+  });
+}
+
 void EpubReaderActivity::resetCurrentBookStatsAfterDelete() {
   stats = BookReadingStats{};
   sessionReadingSeconds = 0;
@@ -5358,6 +5629,12 @@ void EpubReaderActivity::executeReaderQuickAction(CrossPointSettings::LONG_PRESS
       break;
     case CrossPointSettings::LONG_MENU_BOOKORBIT_SYNC:
       onReaderMenuConfirm(EpubReaderMenuAction::BOOKORBIT_SYNC);
+      break;
+    case CrossPointSettings::LONG_MENU_PEEK_PAGE:
+      handlePeekShortcut();
+      break;
+    case CrossPointSettings::LONG_MENU_SLEEP_AT_CHAPTER_END:
+      onReaderMenuConfirm(EpubReaderMenuAction::SLEEP_AT_CHAPTER_END);
       break;
     case CrossPointSettings::LONG_MENU_MARK_FINISHED: {
       const bool newCompleted = !stats.isCompleted;
@@ -5474,6 +5751,12 @@ bool EpubReaderActivity::handleShortcutAction(const uint8_t rawAction) {
     case CrossPointSettings::SHORT_PWRBTN::BOOKORBIT_SYNC:
       executeReaderQuickAction(CrossPointSettings::LONG_MENU_BOOKORBIT_SYNC);
       return true;
+    case CrossPointSettings::SHORT_PWRBTN::PEEK_PAGE:
+      executeReaderQuickAction(CrossPointSettings::LONG_MENU_PEEK_PAGE);
+      return true;
+    case CrossPointSettings::SHORT_PWRBTN::SLEEP_AT_CHAPTER_END:
+      executeReaderQuickAction(CrossPointSettings::LONG_MENU_SLEEP_AT_CHAPTER_END);
+      return true;
     case CrossPointSettings::SHORT_PWRBTN::MARK_FINISHED:
       executeReaderQuickAction(CrossPointSettings::LONG_MENU_MARK_FINISHED);
       return true;
@@ -5569,6 +5852,12 @@ bool EpubReaderActivity::handleShortcutAction(const CrossPointSettings::SHORT_PW
       return true;
     case CrossPointSettings::SHORT_PWRBTN::BOOKORBIT_SYNC:
       executeReaderQuickAction(CrossPointSettings::LONG_MENU_BOOKORBIT_SYNC);
+      return true;
+    case CrossPointSettings::SHORT_PWRBTN::PEEK_PAGE:
+      executeReaderQuickAction(CrossPointSettings::LONG_MENU_PEEK_PAGE);
+      return true;
+    case CrossPointSettings::SHORT_PWRBTN::SLEEP_AT_CHAPTER_END:
+      executeReaderQuickAction(CrossPointSettings::LONG_MENU_SLEEP_AT_CHAPTER_END);
       return true;
     case CrossPointSettings::SHORT_PWRBTN::MARK_FINISHED:
       executeReaderQuickAction(CrossPointSettings::LONG_MENU_MARK_FINISHED);
@@ -5774,6 +6063,12 @@ bool EpubReaderActivity::executeShortPowerButtonAction() {
     case CrossPointSettings::SHORT_PWRBTN::BOOKORBIT_SYNC:
       executeReaderQuickAction(CrossPointSettings::LONG_MENU_BOOKORBIT_SYNC);
       return true;
+    case CrossPointSettings::SHORT_PWRBTN::PEEK_PAGE:
+      executeReaderQuickAction(CrossPointSettings::LONG_MENU_PEEK_PAGE);
+      return true;
+    case CrossPointSettings::SHORT_PWRBTN::SLEEP_AT_CHAPTER_END:
+      executeReaderQuickAction(CrossPointSettings::LONG_MENU_SLEEP_AT_CHAPTER_END);
+      return true;
     case CrossPointSettings::SHORT_PWRBTN::MARK_FINISHED:
       executeReaderQuickAction(CrossPointSettings::LONG_MENU_MARK_FINISHED);
       return true;
@@ -5887,6 +6182,14 @@ bool EpubReaderActivity::executeLongPowerButtonAction() {
     case CrossPointSettings::SHORT_PWRBTN::BOOKORBIT_SYNC:
       mappedInput.suppressNextPowerConfirmRelease();
       executeReaderQuickAction(CrossPointSettings::LONG_MENU_BOOKORBIT_SYNC);
+      return true;
+    case CrossPointSettings::SHORT_PWRBTN::PEEK_PAGE:
+      mappedInput.suppressNextPowerConfirmRelease();
+      executeReaderQuickAction(CrossPointSettings::LONG_MENU_PEEK_PAGE);
+      return true;
+    case CrossPointSettings::SHORT_PWRBTN::SLEEP_AT_CHAPTER_END:
+      mappedInput.suppressNextPowerConfirmRelease();
+      executeReaderQuickAction(CrossPointSettings::LONG_MENU_SLEEP_AT_CHAPTER_END);
       return true;
     case CrossPointSettings::SHORT_PWRBTN::NEARBY_POSITION_SYNC:
       mappedInput.suppressNextPowerConfirmRelease();
@@ -6250,6 +6553,11 @@ bool EpubReaderActivity::isAtBookStart() const {
 void EpubReaderActivity::pageTurn(bool isForwardTurn, const char* source) {
   if (!isForwardTurn && isAtBookStart()) return;
   pageLoadRetryCount = 0;
+  // Leafing through a map or glossary takes a few pages; reading on past this many means
+  // the peek turned into reading, which must save its position again.
+  if (peekActive && ++peekPagesTurned > MAX_PEEK_PAGE_TURNS) {
+    endPeekWithoutReturn("read_on");
+  }
   if (activeFootnotePreview) {
     if (isForwardTurn) {
       if (section && section->currentPage < section->pageCount - 1) {
@@ -6288,6 +6596,19 @@ void EpubReaderActivity::pageTurn(bool isForwardTurn, const char* source) {
     if (section->currentPage < section->pageCount - 1 || section->isBuilding() || section->isPartial()) {
       section->currentPage++;
     } else {
+      // Sleep at Chapter End: the turn past a chapter's last page is where the timer
+      // counts. The device sleeps on that last page, so a wake shows the chapter's end and
+      // the next turn opens the new chapter.
+      if (chapterEndSleepChapters > 0 && !peekActive && isChapterBoundaryAfter(currentSpineIndex)) {
+        chapterEndSleepChapters--;
+        if (chapterEndSleepChapters == 0) {
+          LOG_INF("ERS", "Chapter end reached: sleeping as Sleep at Chapter End asked");
+          clearPendingManualPageTurns(/*requestRecoveryRedraw=*/false);
+          enterDeepSleep();
+          return;
+        }
+        LOG_INF("ERS", "Chapter end reached: %u more before sleep", static_cast<unsigned>(chapterEndSleepChapters));
+      }
       if (shouldQueueCompletionPromptOnChapterExit()) {
         clearPendingManualPageTurns();
         completionPromptQueued = true;
@@ -7451,6 +7772,11 @@ bool EpubReaderActivity::saveProgress(int spineIndex, int currentPage, int pageC
   if (activeFootnotePreview && !allowDuringFootnotePreview) {
     return true;
   }
+  // The reading position stays where the peek started (saved on the way out), so a sleep
+  // or a sync while the Peek page is up resumes at the page being read.
+  if (peekActive) {
+    return true;
+  }
   if (!epub) {
     return false;
   }
@@ -7989,6 +8315,9 @@ bool EpubReaderActivity::renderContents(std::unique_ptr<Page> page, const int fo
   if (pendingCompletedFeedback) {
     const char* msg = completedFeedbackIsFinished ? tr(STR_MARKED_FINISHED) : tr(STR_MARKED_UNFINISHED);
     drawToastBuffer(renderer, msg);
+  }
+  if (pendingReaderToast) {
+    drawToastBuffer(renderer, readerToastText);
   }
   if (pendingTiltPageTurnFeedback) {
     const char* msg = homeButtonInReaderFeedback

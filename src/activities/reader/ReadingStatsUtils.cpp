@@ -2,6 +2,7 @@
 
 #include <HalClock.h>
 
+#include <cstdio>
 #include <ctime>
 
 #include "CrossPointSettings.h"

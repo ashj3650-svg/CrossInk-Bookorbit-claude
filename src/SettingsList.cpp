@@ -114,6 +114,10 @@ const std::vector<SettingInfo>& getBaseSettingsList() {
     add(SettingInfo::Enum(StrId::STR_IMAGES, &CrossPointSettings::imageRendering,
                           {StrId::STR_IMAGES_DISPLAY, StrId::STR_IMAGES_PLACEHOLDER, StrId::STR_IMAGES_SUPPRESS},
                           "imageRendering", StrId::STR_CAT_READER));
+    add(SettingInfo::Enum(
+        StrId::STR_RECAP_AFTER_AWAY, &CrossPointSettings::recapAfterAway,
+        {StrId::STR_STATE_OFF, StrId::STR_AFTER_1_DAY, StrId::STR_AFTER_3_DAYS, StrId::STR_AFTER_1_WEEK},
+        "recapAfterAway", StrId::STR_CAT_READER));
     add(SettingInfo::Toggle(StrId::STR_TOUCH_READER_CONTROLS, &CrossPointSettings::touchReaderControls,
                             "touchReaderControls", StrId::STR_CAT_READER));
     add(SettingInfo::Toggle(StrId::STR_DISABLE_TOUCHSCREEN, &CrossPointSettings::disableReaderTouchscreen,
@@ -269,6 +273,10 @@ const std::vector<SettingInfo>& getBaseSettingsList() {
                            "readingIdleTimeThresholdUnits", StrId::STR_CAT_SYSTEM));
     add(SettingInfo::Toggle(StrId::STR_TRACK_READING_STATS, &CrossPointSettings::trackReadingStats, "trackReadingStats",
                             StrId::STR_CAT_SYSTEM));
+#if CROSSINK_APP_HOME_WIFI
+    add(SettingInfo::Toggle(StrId::STR_WIFI_AT_HOME, &CrossPointSettings::wifiAtHome, "wifiAtHome",
+                            StrId::STR_CAT_SYSTEM));
+#endif
     add(SettingInfo::Toggle(StrId::STR_OTA_INCLUDE_PRERELEASES, &CrossPointSettings::otaIncludePrereleases,
                             "otaIncludePrereleases", StrId::STR_CAT_SYSTEM));
 
@@ -387,6 +395,17 @@ const std::vector<SettingInfo>& getBaseSettingsList() {
           BOOKORBIT_STORE.saveToFile();
         },
         "boSyncOnSleep", StrId::STR_BOOKORBIT_SYNC));
+#if CROSSINK_APP_SLEEP_AUTO_DOWNLOAD
+    add(SettingInfo::DynamicEnum(
+        StrId::STR_BOOKORBIT_AUTO_DOWNLOAD, {StrId::STR_STATE_OFF, StrId::STR_STATE_ON},
+        [] { return static_cast<uint8_t>(BOOKORBIT_STORE.getAutoDownloadNew()); },
+        [](uint8_t v) {
+          // Only a change moves the watermark: saving the web form again must not skip
+          // the books waiting for the next sleep.
+          if ((v != 0) != BOOKORBIT_STORE.getAutoDownloadNew()) BookOrbitAutoDownload::setEnabled(v != 0);
+        },
+        "boAutoDownload", StrId::STR_BOOKORBIT_SYNC));
+#endif
 
     // Legacy fields stay in JSON for one-time status bar migration; the web
     // editor uses /api/status-bars instead of exposing these controls.

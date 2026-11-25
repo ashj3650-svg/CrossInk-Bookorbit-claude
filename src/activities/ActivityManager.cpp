@@ -36,6 +36,7 @@
 #include "home/RecentBookProgress.h"
 #include "library/LibraryActivity.h"
 #include "network/CrossPointWebServerActivity.h"
+#include "network/HomeWifi.h"
 #include "network/NearbyBookTransferActivity.h"
 #include "network/NearbyStatsSyncActivity.h"
 #include "network/UsbDriveActivity.h"
@@ -674,6 +675,7 @@ void ActivityManager::loop() {
       currentActivity = std::move(pendingActivity);
 
       lock.unlock();  // onEnter may acquire its own lock
+      HomeWifi::onActivityEntering(currentActivity->name == "Home", currentActivity->isReaderActivity());
       currentActivity->onEnter();
 
       if (pendingAction == PendingAction::None && pendingReaderMenuAction >= 0 &&
@@ -851,6 +853,7 @@ void ActivityManager::replaceActivity(std::unique_ptr<Activity>&& newActivity) {
     // No current activity, safe to launch immediately
     TouchRegistry::getInstance().clear();
     currentActivity = std::move(newActivity);
+    HomeWifi::onActivityEntering(currentActivity->name == "Home", currentActivity->isReaderActivity());
     currentActivity->onEnter();
   }
 }

@@ -5,6 +5,7 @@
 #include <I18n.h>
 #include <Memory.h>
 
+#include "BookOrbitCredentialStore.h"
 #include "CrossPointSettings.h"
 #include "CrossPointState.h"
 #include "Epub.h"
@@ -13,9 +14,11 @@
 #include "TxtReaderActivity.h"
 #include "Xtc.h"
 #include "XtcReaderActivity.h"
+#include "activities/reader/bookorbit/BookOrbitRecentSync.h"
 #include "activities/util/BmpViewerActivity.h"
 #include "activities/util/FullScreenMessageActivity.h"
 #include "components/UITheme.h"
+#include "network/HomeWifi.h"
 #include "util/BookUpdateMigration.h"
 
 bool ReaderActivity::isXtcFile(const std::string& path) { return FsHelpers::hasXtcExtension(path); }
@@ -223,6 +226,14 @@ void ReaderActivity::onEnter() {
     }
     onGoToTxtReader(std::move(txt));
   } else {
+#if CROSSINK_APP_HOME_WIFI
+    // Sync on open: with Wi-Fi up from Home, the book opens where it was last read on any
+    // device, when that is the newer save. Wi-Fi goes off right after (HomeWifi).
+    if (HomeWifi::isConnected() && BOOKORBIT_STORE.hasCredentials()) {
+      GUI.drawPopup(renderer, tr(STR_FETCH_PROGRESS));
+      BookOrbitRecentSync::pullBeforeOpen(renderer, initialBookPath);
+    }
+#endif
     auto result = loadEpub(initialBookPath);
     if (!result.epub) {
       queueEpubOpenAlert(result.failure);

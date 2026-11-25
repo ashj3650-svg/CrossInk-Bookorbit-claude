@@ -11,6 +11,7 @@
 namespace {
 
 using BookOrbitSmartSync::decide;
+using BookOrbitSmartSync::decideNewestSave;
 using BookOrbitSmartSync::Decision;
 using BookOrbitSmartSync::makeMarker;
 using BookOrbitSmartSync::Marker;
@@ -228,4 +229,28 @@ TEST(BookOrbitSmartSyncMarker, APositionItCannotHoldIsRecordedAsADateAlone) {
   ASSERT_TRUE(unknownCount.hasPosition());
   EXPECT_EQ(unknownCount.pageCount, 1);
   EXPECT_EQ(makeMarker(kLastSync, {3, 4, 90000}).pageCount, UINT16_MAX);
+}
+
+TEST(BookOrbitSmartSyncNewestSave, TheMostRecentlySavedPositionWins) {
+  const Marker marker = makeMarker(kLastSync, {5, 12, 30});
+  // Read further on the phone after this device's last page turn: the server wins, even
+  // though this device is further along.
+  EXPECT_EQ(decideNewestSave({9, 2, 30}, {7, 4, 30}, kLater, marker, kLater - 60), Decision::ApplyRemote);
+  // Went back on this device after the phone's save: this device wins although behind.
+  EXPECT_EQ(decideNewestSave({3, 0, 30}, {7, 4, 30}, kLater, marker, kLater + 60), Decision::UploadLocal);
+  // Same place: nothing to do, whatever the dates.
+  EXPECT_EQ(decideNewestSave({7, 4, 30}, {7, 4, 30}, kLater, marker, kLater + 60), Decision::AlreadySynced);
+}
+
+TEST(BookOrbitSmartSyncNewestSave, AServerDateTheWebReaderOnlyRenewedIsNotNewer) {
+  // The web reader opened the book where this device last synced it, dating it now.
+  const Marker marker = makeMarker(kLastSync, {5, 12, 30});
+  EXPECT_EQ(decideNewestSave({6, 3, 30}, {5, 12, 30}, kLater + 600, marker, kLater), Decision::UploadLocal);
+}
+
+TEST(BookOrbitSmartSyncNewestSave, WithoutBothDatesTheMarkerRulesApply) {
+  const Marker marker = makeMarker(kLastSync, {5, 12, 30});
+  EXPECT_EQ(decideNewestSave({9, 2, 30}, {7, 4, 30}, kLater, marker, 0),
+            decide({9, 2, 30}, {7, 4, 30}, kLater, marker));
+  EXPECT_EQ(decideNewestSave({9, 2, 30}, {7, 4, 30}, 0, Marker{}, kLater), Decision::AskNoHistory);
 }

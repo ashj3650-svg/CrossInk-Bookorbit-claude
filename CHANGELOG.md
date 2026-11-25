@@ -5,6 +5,25 @@ records only its own additions. Each release states the CrossInk version it is b
 on; for everything inherited from upstream, see the
 [CrossInk changelog](https://github.com/uxjulia/CrossInk/blob/main/CHANGELOG.md).
 
+## [Unreleased]
+
+Based on CrossInk v1.6.1.
+
+### Added
+
+- A "Previously..." card when you open a book you have not read for a while: the book and chapter, how long ago you last read it, and the last lines you read. Any button continues to the page. Settings > Reader > Recap After Time Away chooses after how long it appears (1 day, 3 days or 1 week, 3 days by default) or turns it off. It needs the clock to be set, and skips books last read before this update.
+- Peek Page: pin one page of a book, such as a map or a cast list, and jump to it and back. Pin and go to it from the reader menu's Location tab, or set Peek Page as a shortcut (power button or long-press menu): the first press pins the page you are on, then each press jumps to the pinned page and the next press, or Back, returns you where you were. Reading on from the pinned page for more than 10 pages ends the peek where you are. The pinned page does not change your saved reading position.
+- Sleep at Chapter End: a bedtime timer counted in chapters. From the reader menu's More tab or a shortcut, choose to sleep after this chapter, 2 chapters or 3; the reader goes to sleep when you turn past the last page of that chapter. It lasts until you close the book.
+- Wi-Fi at Home (X4 Classic, X4 Pro and reTerminal Sticky): while Home is showing, the reader joins your last Wi-Fi network in the background, or the strongest other saved one, and stays connected. Wi-Fi goes off when you open a book, when the reader sleeps, and after 10 minutes on Home without a button press; a press brings it back. Networks that do not answer are tried again after 1, 5 and then 15 minutes. Turn it off in Settings > System > Wi-Fi at Home. The X3 and X4 keep Wi-Fi on demand as before.
+- Sync on open: with Wi-Fi at Home connected, opening a book first asks BookOrbit where you last read it, and opens there when that is the more recent save (for example after reading on your phone). Wi-Fi then goes off for reading.
+- The sleep sync now also syncs the reading position of your other recent books, up to 10 (X4 Classic, X4 Pro and reTerminal Sticky). For these, and now for the book you were reading too, the sync behind the sleep screen keeps whichever position was saved most recently, on this reader or elsewhere, where it used to leave a disagreement for the next manual sync. A position that only changed date because BookOrbit's web reader opened the book does not count as a newer save. The reader now records when each book's position last moved; books not read since this update keep the previous behavior until their next page turn.
+- Download New Books (X4 Classic, X4 Pro and reTerminal Sticky): the sleep sync can download the books added to your BookOrbit library, on the Wi-Fi connection it already has. Turn it on in Settings > BookOrbit Sync; only books added after that are downloaded, up to 5 per sleep, oldest first, into the catalog's download folder. A book already on the card is not downloaded again, nor is one you delete afterwards. It stops when the card is nearly full (5% of the card or 512 MB left, on exFAT cards; elsewhere when a download no longer fits) and when you wake the reader.
+- Background catalog downloads (X4 Classic, X4 Pro and reTerminal Sticky): choosing Download in the BookOrbit catalog no longer shows a downloading screen. The book downloads while you keep browsing, its row shows how far it got, and you can queue up to 8 books. A short message says when each one is done or why it failed. Leaving the catalog or opening a book waits for the downloads with a "Finishing downloads..." screen, where Back cancels the rest. A Home shelf book and a sync's update of the open book still download on their own screen.
+
+### Fixed
+
+- A damaged settings or library file on the SD card (recent books, reader state, Wi-Fi networks, bookmarks, a book's cached details) can no longer crash the reader while it starts or opens a book. A file whose stored text length is impossible is now read as damaged and skipped, where the reader used to try to reserve up to 4 GB for it and restart.
+
 ## [v1.6.1+bookorbit.9] - 2026-11-22
 
 Based on CrossInk v1.6.1.
