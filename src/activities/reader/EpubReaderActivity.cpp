@@ -2734,6 +2734,10 @@ void EpubReaderActivity::onExit() {
   clearPendingManualPageTurns(/*requestRecoveryRedraw=*/false);
   mappedInput.setReaderTouchscreenOverride(false);
 
+  // A chapter built ahead keeps the pages it reached as a partial (Section::suspendBuild).
+  stopIndexAhead();
+  preloadedPage.reset();
+
   // The image callbacks hold the Epub as a raw context pointer.
   ImageBlock::setExtractor(nullptr, nullptr, nullptr);
   releaseGrayscaleStripScratch(true);
@@ -3011,7 +3015,10 @@ void EpubReaderActivity::idlePrewarmNextPage() {
   }
 
   const int renderFontId = activeSectionFontId != 0 ? activeSectionFontId : SETTINGS.getReaderFontId();
-  if (!renderer.isSdCardFont(renderFontId) ||
+  // PSRAM boards also prepare the next page for built-in and scalable fonts, and keep it
+  // for the forward turn (see takePreloadedPage). The others only warm SD-card fonts.
+  const bool keepPage = psramHeapAvailable() && !section->isPartial();
+  if ((!keepPage && !renderer.isSdCardFont(renderFontId)) ||
       (idlePrewarmSpine == currentSpineIndex && idlePrewarmPage == section->currentPage &&
        idlePrewarmFontId == renderFontId)) {
     return;
@@ -3046,10 +3053,117 @@ void EpubReaderActivity::idlePrewarmNextPage() {
   }
 
   const unsigned long startedAt = millis();
-  auto scope = fcm->createPrewarmScope();
-  page->renderText(renderer, renderFontId, 0, 0);
-  scope.endScanAndPrewarm();
-  LOG_DBG("ERS", "Idle SD font prewarm: spine=%d page=%d in %lums", currentSpineIndex, nextPage, millis() - startedAt);
+  {
+    auto scope = fcm->createPrewarmScope();
+    page->renderText(renderer, renderFontId, 0, 0);
+    scope.endScanAndPrewarm();
+  }
+  LOG_DBG("ERS", "Idle next-page prewarm: spine=%d page=%d in %lums", currentSpineIndex, nextPage,
+          millis() - startedAt);
+  if (keepPage) {
+    preloadedPage = std::move(page);
+    preloadedSection = section.get();
+    preloadedSpine = currentSpineIndex;
+    preloadedPageIndex = nextPage;
+    preloadedPageCount = section->pageCount;
+    preloadedLayoutSignature = activeSectionLayoutSignature;
+  }
+}
+
+std::unique_ptr<Page> EpubReaderActivity::takePreloadedPage(const int pageIndex) {
+  std::unique_ptr<Page> page = std::move(preloadedPage);
+  if (!page || !section || activeFootnotePreview || section->isBuilding() || section->isPartial() ||
+      preloadedSection != section.get() || preloadedSpine != currentSpineIndex || preloadedPageIndex != pageIndex ||
+      preloadedPageCount != section->pageCount || preloadedLayoutSignature != activeSectionLayoutSignature) {
+    return nullptr;
+  }
+  return page;
+}
+
+void EpubReaderActivity::stopIndexAhead() {
+  if (!aheadSection) return;
+  LOG_DBG("ERS", "Index ahead: leaving chapter %d as a partial", aheadSpine);
+  aheadSection.reset();  // suspendBuild() keeps the pages laid out so far
+  aheadSpine = -1;
+}
+
+void EpubReaderActivity::tickIndexAhead() {
+  if (!psramHeapAvailable() || !epub || !section || activeFootnotePreview || automaticPageTurnActive ||
+      section->isBuilding() || section->isPartial() || buildViewportWidth == 0 || lastRenderCompleteMs == 0 ||
+      (millis() - lastRenderCompleteMs) < INDEX_AHEAD_IDLE_MS ||
+      backgroundBuildYieldForInput.load(std::memory_order_relaxed)) {
+    return;
+  }
+  RenderLock lock(*this, RenderLock::Mode::Try);
+  if (!lock.ownsLock()) return;
+
+  // The chapters ahead are surveyed again whenever the reader changes chapter or layout.
+  if (aheadBaseSpine != currentSpineIndex || aheadSignature != activeSectionLayoutSignature) {
+    stopIndexAhead();
+    aheadBaseSpine = currentSpineIndex;
+    aheadSignature = activeSectionLayoutSignature;
+    aheadNextSpine = currentSpineIndex + 1;
+    aheadStopped = false;
+  }
+  if (aheadStopped) return;
+
+  const int fontId = activeSectionFontId != 0 ? activeSectionFontId : SETTINGS.getReaderFontId();
+  const EpubRenderMode renderMode = normalizeRenderMode(SETTINGS.epubRenderMode);
+  const ReaderRenderSpec spec = readerRenderSpecForProfile(fontId, buildViewportWidth, buildViewportHeight,
+                                                           buildProfileForRenderMode(renderMode));
+  if (readerRenderSpecSignature(spec) != activeSectionLayoutSignature) {
+    // This chapter fell back to another layout (Safe Mode, a lighter render mode): a chapter
+    // built ahead with the selected one might not be the layout the reader ends up using.
+    aheadStopped = true;
+    return;
+  }
+
+  if (!aheadSection) {
+    const int lastSpine = std::min(currentSpineIndex + INDEX_AHEAD_CHAPTERS, epub->getSpineItemsCount() - 1);
+    if (aheadNextSpine > lastSpine) return;  // all ready
+    if (!backgroundSectionBuildHasHeap()) return;
+    const char* suffix = sectionCacheSuffixForRenderMode(renderMode);
+    {
+      // One chapter checked per tick: loading its header is one short SD read.
+      auto cached = makeUniqueNoThrow<Section>(epub, aheadNextSpine, renderer, suffix);
+      if (!cached) {
+        aheadStopped = true;
+        return;
+      }
+      if (cached->loadSectionFile(spec) && !cached->isPartial()) {
+        aheadNextSpine++;
+        return;
+      }
+      // Closed before the build reopens the same path (one reader per file on the card).
+    }
+    aheadSection = makeUniqueNoThrow<Section>(epub, aheadNextSpine, renderer, suffix);
+    if (!aheadSection || !aheadSection->startBuild(spec)) {
+      LOG_ERR("ERS", "Index ahead: cannot start chapter %d", aheadNextSpine);
+      aheadSection.reset();
+      aheadStopped = true;
+      return;
+    }
+    aheadSpine = aheadNextSpine;
+    LOG_DBG("ERS", "Index ahead: building chapter %d", aheadSpine);
+    return;
+  }
+
+  releaseGrayscaleStripScratch();
+  if (!backgroundSectionBuildHasHeap()) return;
+  if (!aheadSection->buildSomeMore(BACKGROUND_BUILD_PAGES_PER_TICK)) {
+    LOG_ERR("ERS", "Index ahead: chapter %d failed", aheadSpine);
+    aheadSection->abandonBuild();
+    aheadSection.reset();
+    aheadSpine = -1;
+    aheadStopped = true;
+    return;
+  }
+  if (aheadSection->isBuildComplete()) {
+    LOG_DBG("ERS", "Index ahead: chapter %d ready (%u pages)", aheadSpine, aheadSection->pageCount);
+    aheadSection.reset();
+    aheadSpine = -1;
+    aheadNextSpine++;
+  }
 }
 
 // One dismissal rule for every transient reader confirmation: it clears when its
@@ -3159,6 +3273,7 @@ void EpubReaderActivity::loop() {
         !partialRebuildAbortedForLowMemory &&
         section->currentPage + PARTIAL_REBUILD_START_MARGIN >= static_cast<int>(section->pageCount)) {
       releaseGrayscaleStripScratch();
+      stopIndexAhead();  // one build at a time (see render())
       if (backgroundSectionBuildHasHeap()) {
         const int renderFontId = activeSectionFontId != 0 ? activeSectionFontId : SETTINGS.getReaderFontId();
         const SectionBuildProfile profile = buildProfileForRenderMode(normalizeRenderMode(SETTINGS.epubRenderMode));
@@ -3641,6 +3756,7 @@ void EpubReaderActivity::loop() {
       return;
     }
     idlePrewarmNextPage();
+    tickIndexAhead();
     return;
   }
 
@@ -6664,6 +6780,11 @@ void EpubReaderActivity::render(RenderLock&& lock) {
   if (!epub) {
     return;
   }
+  // A chapter change (or a build of this chapter) stops the chapter being built ahead: its
+  // pages so far are kept as a partial, and the next idle tick resumes the survey. Two builds
+  // must not overlap: they share the book's CSS rules, which each clears when it ends, and
+  // the reader reaching that chapter would otherwise write its cache file a second time.
+  if (aheadSection && (!section || section->isBuilding() || aheadSpine == currentSpineIndex)) stopIndexAhead();
   if (quickActionsPopup.processRender(renderer, mappedInput)) {
     return;
   }
@@ -7368,7 +7489,9 @@ void EpubReaderActivity::render(RenderLock&& lock) {
   {
     // Unified page read: the in-progress build's in-RAM table if it has reached the page,
     // otherwise the on-disk file (finalized section, or a partial from a previous session).
-    auto p = section->loadPage(section->currentPage);
+    // A forward turn takes the page idlePrewarmNextPage already read.
+    auto p = takePreloadedPage(section->currentPage);
+    if (!p) p = section->loadPage(section->currentPage);
     if (!p) {
       pageLoadRetryCount++;
       if (pageLoadRetryCount <= MAX_PAGE_LOAD_RETRIES) {
@@ -7469,6 +7592,8 @@ void EpubReaderActivity::silentIndexNextChapterIfNeeded(const uint16_t viewportW
       !section || section->isBuilding() || section->isPartial() || section->pageCount == 0) {
     return;
   }
+  // Index ahead is already building the chapters after this one, in steps.
+  if (aheadSection) return;
 
   // Start on the penultimate page, including one-page chapters, and catch up
   // after a direct jump to the last page.

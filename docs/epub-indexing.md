@@ -76,6 +76,23 @@ between Incremental and Full Section does not change the saved reading location:
 Full Section resolves it as soon as the chapter is built, while Incremental only
 builds through the requested content.
 
+## Index Ahead (X4 Classic, X4 Pro and reTerminal Sticky)
+
+On readers with extra memory (PSRAM), both methods also prepare the chapters
+after the one you are reading. Once a page has been on screen for a moment,
+CrossInk lays out the next chapter a page at a time, then the one after, up to
+three chapters ahead, and saves them to the book's cache like any other
+chapter. Reaching them later needs no **Indexing** wait.
+
+A button press always comes first: the work stops between two pages for it,
+and continues once you settle on a page again. A chapter you reach before it
+is finished keeps the pages already laid out and is completed from there the
+usual way. Changing the font, its size, the margins or other layout settings
+starts over with the new layout, as any layout change does.
+
+The same readers also read the next page from the cache while you read the
+current one and prepare its letters, so a forward page turn only draws it.
+
 ## Changing The Setting
 
 To change the default for future EPUBs, open **Settings → Reader → Indexing
