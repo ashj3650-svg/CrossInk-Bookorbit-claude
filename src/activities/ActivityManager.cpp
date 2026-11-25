@@ -960,8 +960,8 @@ void ActivityManager::goToFileBrowser(std::string path) {
   replaceActivity(std::make_unique<FileBrowserActivity>(renderer, mappedInput, std::move(path)));
 }
 
-void ActivityManager::goToLibrary() {
-  auto library = makeUniqueNoThrow<LibraryActivity>(renderer, mappedInput);
+void ActivityManager::goToLibrary(const bool startWithSearch) {
+  auto library = makeUniqueNoThrow<LibraryActivity>(renderer, mappedInput, startWithSearch);
   if (!library) {
     LOG_ERR("ACT", "Cannot allocate Library activity");
     return;
@@ -1173,6 +1173,8 @@ bool ActivityManager::requiresExclusiveStorageLoop() const {
 }
 
 bool ActivityManager::blocksGlobalInput() const { return currentActivity && currentActivity->blocksGlobalInput(); }
+
+bool ActivityManager::isDeviceLocked() const { return currentActivity && currentActivity->isDeviceLock(); }
 
 bool ActivityManager::isHomeActivity() const { return currentActivity && currentActivity->name == "Home"; }
 

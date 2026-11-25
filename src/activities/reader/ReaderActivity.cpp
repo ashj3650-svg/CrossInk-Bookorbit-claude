@@ -19,6 +19,7 @@
 #include "activities/util/FullScreenMessageActivity.h"
 #include "components/UITheme.h"
 #include "network/HomeWifi.h"
+#include "util/BookOrbitNewBooks.h"
 #include "util/BookUpdateMigration.h"
 
 bool ReaderActivity::isXtcFile(const std::string& path) { return FsHelpers::hasXtcExtension(path); }
@@ -226,6 +227,7 @@ void ReaderActivity::onEnter() {
     }
     onGoToTxtReader(std::move(txt));
   } else {
+    BookOrbitNewBooks::markOpened(initialBookPath);
 #if CROSSINK_APP_HOME_WIFI
     // Sync on open: with Wi-Fi up from Home, the book opens where it was last read on any
     // device, when that is the newer save. Wi-Fi goes off right after (HomeWifi).

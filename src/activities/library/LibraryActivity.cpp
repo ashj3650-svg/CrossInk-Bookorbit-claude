@@ -76,10 +76,11 @@ bool hasValidGridThumb(const std::string& path, const int width, const int heigh
 }
 }  // namespace
 
-LibraryActivity::LibraryActivity(GfxRenderer& renderer, MappedInputManager& mappedInput)
+LibraryActivity::LibraryActivity(GfxRenderer& renderer, MappedInputManager& mappedInput, const bool startWithSearch)
     : Activity("Library", renderer, mappedInput),
       uiTarget(makeUiTarget(renderer)),
-      app(uiTarget, uiTarget.deviceContext()) {}
+      app(uiTarget, uiTarget.deviceContext()),
+      startWithSearch(startWithSearch) {}
 
 void LibraryActivity::onEnter() {
   pendingInput.clear();
@@ -126,6 +127,7 @@ void LibraryActivity::onEnter() {
     resetViewport();
     ignoreConfirmRelease = mappedInput.isPressed(MappedInputManager::Button::Confirm);
     requestUpdate();
+    if (startWithSearch) openSearch();
   }
 }
 
@@ -461,8 +463,10 @@ void LibraryActivity::applyFilter() {
   name.reserve(UINT8_MAX);
   path.reserve(256);
   cachePath.reserve(64);
-  combined.reserve(2 * UINT8_MAX + 1);
-  folded.reserve(2 * UINT8_MAX + 1);
+  std::string series;
+  series.reserve(UINT8_MAX);
+  combined.reserve(3 * UINT8_MAX + 2);
+  folded.reserve(3 * UINT8_MAX + 2);
   const auto readIndexedPath = [&](const library::ClixRecord& record) {
     if (!folderOffsets) {
       folderOffsets = makeUniqueNoThrow<uint32_t[]>(library::LibraryIndexFile::FOLDER_CHECKPOINT_COUNT);
@@ -499,6 +503,12 @@ void LibraryActivity::applyFilter() {
       combined.assign(title);
       combined.push_back(' ');
       combined.append(author);
+      // A series name finds every book of it. Indexes older than version 3 have none,
+      // and an unreadable one only narrows the match.
+      if (index.readSeries(record, series) && !series.empty()) {
+        combined.push_back(' ');
+        combined.append(series);
+      }
       library::foldInto(combined, folded);
     }
     // Only matching books need their completion state read from the SD card.
@@ -603,7 +613,21 @@ void LibraryActivity::openSortPicker(const int selectedIndex) {
                                       StrId::STR_LIBRARY_SERIES,
                                       StrId::STR_LIBRARY_GENRE};
   const bool buttonOnly = !mappedInput.hasTouchHardware();
+  // Without touch, Right is the search, so the Library's own settings and rescan close
+  // this list, after the sorts.
+  constexpr int BUTTON_SETTINGS_ROW = 8;
+  constexpr int BUTTON_RESCAN_ROW = 9;
   auto onSelect = [this, buttonOnly](const int selected) {
+    if (buttonOnly && selected == BUTTON_SETTINGS_ROW) {
+      openSettings();
+      return;
+    }
+    if (buttonOnly && selected == BUTTON_RESCAN_ROW) {
+      refreshLibrary();
+      return;
+    }
+    // A sort picked during a search is the user's own: keep it once the search ends.
+    searchSwitchedSort = false;
     if (buttonOnly && selected == 0) {
       descending = !descending;
     } else {
@@ -623,38 +647,54 @@ void LibraryActivity::openSortPicker(const int selectedIndex) {
   if (buttonOnly) {
     const char* options[] = {descending ? "Z-A" : "A-Z", I18N.get(choices[0]), I18N.get(choices[1]),
                              I18N.get(choices[2]),       I18N.get(choices[3]), I18N.get(choices[4]),
-                             I18N.get(choices[5]),       I18N.get(choices[6])};
-    actionPopup.show(tr(STR_LIBRARY_SORT_BY), options, 8, selectedIndex < 0 ? 0 : selectedIndex, std::move(onSelect));
+                             I18N.get(choices[5]),       I18N.get(choices[6]), tr(STR_SETTINGS_SHORT),
+                             tr(STR_LIBRARY_RESCAN)};
+    actionPopup.show(tr(STR_LIBRARY_SORT_BY), options, 10, selectedIndex < 0 ? 0 : selectedIndex, std::move(onSelect));
     actionPopup.setDividerAfterOption(0);
   } else {
     actionPopup.show(StrId::STR_LIBRARY_SORT_BY, choices, 7, static_cast<int>(sort), std::move(onSelect));
   }
   if (index.isOpen() && index.header().formatVersion < 4)
-    actionPopup.setDisabledOptions(buttonOnly ? std::vector<bool>{false, false, false, false, false, false, true, true}
-                                              : std::vector<bool>{false, false, false, false, false, true, true});
-  requestUpdate();
-}
-
-void LibraryActivity::openMenu() {
-  static constexpr StrId choices[] = {StrId::STR_SEARCH, StrId::STR_SETTINGS_SHORT, StrId::STR_LIBRARY_RESCAN};
-  actionPopup.show(StrId::STR_MENU, choices, 3, 0, [this](const int selected) {
-    if (selected == 0) openSearch();
-    if (selected == 1) openSettings();
-    if (selected == 2) refreshLibrary();
-  });
+    actionPopup.setDisabledOptions(
+        buttonOnly ? std::vector<bool>{false, false, false, false, false, false, true, true, false, false}
+                   : std::vector<bool>{false, false, false, false, false, true, true});
   requestUpdate();
 }
 
 void LibraryActivity::openSearch() {
+  const bool fromHome = startWithSearch;
+  startWithSearch = false;
   openDialog(
       makeUniqueNoThrow<KeyboardEntryActivity>(renderer, mappedInput, tr(STR_SEARCH), query, 48, InputType::Text),
-      [this](const ActivityResult& result) {
+      [this, fromHome](const ActivityResult& result) {
         const auto* text = std::get_if<KeyboardResult>(&result.data);
-        if (result.isCancelled || !text) return;
-        query = text->text;
-        applyFilter();
-        resetViewport();
+        if (result.isCancelled || !text) {
+          // Home's Search button opened the Library only for this search.
+          if (fromHome && query.empty()) onGoHome();
+          return;
+        }
+        setQuery(text->text);
       });
+}
+
+void LibraryActivity::setQuery(std::string text) {
+  query = std::move(text);
+  if (!query.empty() && sort == Sort::RecentlyRead) {
+    searchSwitchedSort = true;
+    searchSwitchedDescending = descending;
+    sort = Sort::Title;
+    descending = false;
+    refreshIndexIfNeeded(true);
+  } else if (query.empty() && searchSwitchedSort) {
+    searchSwitchedSort = false;
+    sort = Sort::RecentlyRead;
+    descending = searchSwitchedDescending;
+    refreshIndexIfNeeded();
+  } else {
+    applyFilter();
+  }
+  resetViewport();
+  requestUpdate();
 }
 
 void LibraryActivity::refreshLibrary() {
@@ -892,12 +932,9 @@ void LibraryActivity::handleInput(const LibraryInputBuffer::Event& input) {
   }
   if (input.type == Type::BackRelease) {
     pendingInput.clear();
-    if (!query.empty()) {
-      query.clear();
-      applyFilter();
-      resetViewport();
-      requestUpdate();
-    } else
+    if (!query.empty())
+      setQuery({});
+    else
       onGoHome();
     return;
   }
@@ -936,7 +973,7 @@ void LibraryActivity::handleInput(const LibraryInputBuffer::Event& input) {
     }
     if (input.type == Type::RightRelease) {
       pendingInput.clear();
-      openMenu();
+      openSearch();
       return;
     }
   }
@@ -1205,7 +1242,9 @@ void LibraryActivity::buildListScreen(UiApp::ScreenType& screen) {
   if (!query.empty()) {
     const auto search =
         screen.take(fui::LayoutAnchor::Top, uiTarget.lineHeight(screen.theme().smallText.font) + 8).inset(statusInsets);
-    uiTarget.text(search, query.c_str(), screen.theme().smallText);
+    char label[64];
+    snprintf(label, sizeof(label), "%s: %s", tr(STR_SEARCH), query.c_str());
+    uiTarget.text(search, label, screen.theme().smallText);
   }
   screen.spacer(static_cast<int16_t>(metrics.verticalSpacing));
   if (rowCount() == 0) {
@@ -1432,7 +1471,7 @@ void LibraryActivity::render(RenderLock&&) {
   const auto labels =
       mappedInput.mapLabels(mappedInput.withBackArrow(query.empty() ? tr(STR_HOME) : tr(STR_BACK)), confirmLabel,
                             mappedInput.hasTouchHardware() ? tr(STR_DIR_UP) : tr(STR_SORT),
-                            mappedInput.hasTouchHardware() ? tr(STR_DIR_DOWN) : tr(STR_MENU));
+                            mappedInput.hasTouchHardware() ? tr(STR_DIR_DOWN) : tr(STR_SEARCH));
   GUI.drawButtonHints(renderer, labels.btn1, labels.btn2, labels.btn3, labels.btn4);
   char footer[32];
   snprintf(footer, sizeof(footer), tr(STR_LIBRARY_FILES_COUNT), static_cast<unsigned>(rowCount()));

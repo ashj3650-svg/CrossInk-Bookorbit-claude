@@ -28,6 +28,7 @@
 #if CROSSINK_SCALABLE_FONTS
 #include "TtfRenderOptionsActivity.h"
 #endif
+#include "CrossPointState.h"
 #include "FrontlightTimePickerActivity.h"
 #include "KOReaderSettingsActivity.h"
 #include "KeyboardLayoutsActivity.h"
@@ -40,9 +41,11 @@
 #include "SettingsList.h"
 #include "SilentRestart.h"
 #include "StatusBarSettingsActivity.h"
+#include "activities/home/AlertActivity.h"
 #include "activities/network/WifiSelectionActivity.h"
 #include "activities/reader/GlobalReadingStats.h"
 #include "activities/util/ConfirmationActivity.h"
+#include "activities/util/DevicePinActivity.h"
 #include "activities/util/IntervalSelectionActivity.h"
 #include "activities/util/KeyboardEntryActivity.h"
 #include "activities/util/OptionSelectionActivity.h"
@@ -53,6 +56,8 @@
 #include "components/UiAppHelpers.h"
 #include "components/icons/frontlightHeaderIcons.h"
 #include "fontIds.h"
+#include "util/BatteryUsage.h"
+#include "util/DevicePinStore.h"
 #include "util/DictionaryRegistry.h"
 #include "util/FrontlightSchedule.h"
 
@@ -696,6 +701,34 @@ void SettingsActivity::openWordSpacingPicker() {
       });
 }
 
+void SettingsActivity::startDevicePinSetup() {
+  auto activity = makeUniqueNoThrow<DevicePinActivity>(renderer, mappedInput, DevicePinActivity::Mode::SetNew);
+  if (!activity) {
+    LOG_ERR("SET", "Failed to allocate the PIN screen");
+    return;
+  }
+  startActivityForResult(std::move(activity), [this](const ActivityResult&) { requestUpdate(); });
+}
+
+// Device PIN: with none set, the row goes straight to choosing one; with one set it
+// offers to change it or turn it off.
+void SettingsActivity::openDevicePinMenu() {
+  if (!DevicePinStore::isSet()) {
+    startDevicePinSetup();
+    return;
+  }
+  static constexpr StrId OPTIONS[] = {StrId::STR_PIN_CHANGE, StrId::STR_PIN_TURN_OFF};
+  optionPopup.show(StrId::STR_DEVICE_PIN, OPTIONS, 2, 0, [this](const int selectedIndex) {
+    if (selectedIndex == 0) {
+      startDevicePinSetup();
+      return;
+    }
+    if (selectedIndex == 1) (void)DevicePinStore::clear();
+    requestUpdate();
+  });
+  requestUpdate();
+}
+
 void SettingsActivity::openLanguagePicker() {
   const int languageCount = static_cast<int>(sizeof(SORTED_LANGUAGE_INDICES) / sizeof(SORTED_LANGUAGE_INDICES[0]));
 
@@ -1268,6 +1301,15 @@ void SettingsActivity::toggleCurrentSetting() {
       case SettingAction::ClockSync:
         startActivityForResult(std::make_unique<ClockSyncActivity>(renderer, mappedInput), resultHandler);
         break;
+      case SettingAction::DevicePin:
+        openDevicePinMenu();
+        break;
+      case SettingAction::BatteryUse:
+        snprintf(APP_STATE.pendingAlertTitle, sizeof(APP_STATE.pendingAlertTitle), "%s", tr(STR_BATTERY_USE));
+        BatteryUsage::formatReport(APP_STATE.pendingAlertBody, sizeof(APP_STATE.pendingAlertBody));
+        APP_STATE.pendingAlertGoHomeOnBack.store(false, std::memory_order_relaxed);
+        startActivityForResult(std::make_unique<AlertActivity>(renderer, mappedInput), [](const ActivityResult&) {});
+        break;
       case SettingAction::QuickActions:
         startActivityForResult(std::make_unique<QuickActionsActivity>(renderer, mappedInput), resultHandler);
         break;
@@ -1424,6 +1466,9 @@ std::string SettingsActivity::settingValueText(const SettingInfo& setting) {
   }
   if (setting.type == SettingType::ACTION && setting.action == SettingAction::Language) {
     return I18N.getLanguageName(I18N.getLanguage());
+  }
+  if (setting.type == SettingType::ACTION && setting.action == SettingAction::DevicePin) {
+    return DevicePinStore::isSet() ? tr(STR_STATE_ON) : tr(STR_STATE_OFF);
   }
   if (setting.type == SettingType::STRING) {
     if (setting.nameId == StrId::STR_DEVICE_NAME) return SETTINGS.getEffectiveDeviceName();

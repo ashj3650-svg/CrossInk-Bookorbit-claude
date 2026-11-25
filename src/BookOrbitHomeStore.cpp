@@ -18,6 +18,7 @@
 #include "activities/reader/ReadingDailyMinutes.h"
 #include "activities/reader/ReadingStatsUtils.h"
 #include "network/BookOrbitCatalogClient.h"
+#include "util/BookOrbitNewBooks.h"
 
 namespace BookOrbitHomeStore {
 namespace {
@@ -239,6 +240,21 @@ BookOrbitBookQuery shelfQuery(const BookOrbitHomeShelfSource& source) {
   return query;
 }
 
+// The books Download New Books brought in and nobody opened yet: listed on the card,
+// with the covers the server keeps for them.
+void fillNewBooksShelf(BookOrbitHomeShelf& shelf) {
+  BookOrbitNewBooks::Book books[BookOrbitNewBooks::MAX_BOOKS];
+  const uint8_t count = BookOrbitNewBooks::load(books);
+  shelf.count = 0;
+  for (uint8_t i = 0; i < count && shelf.count < BookOrbitHomeShelf::BOOK_COUNT; i++) {
+    BookOrbitHomeBook& out = shelf.books[shelf.count++];
+    out = BookOrbitHomeBook{};
+    out.id = books[i].id;
+    out.hasCover = true;
+    copyText(out.title, books[i].title);
+  }
+}
+
 // The first books of a shelf's listing. Discover is the dashboard's to fill.
 bool fetchShelf(BookOrbitHomeShelf& shelf) {
   BookOrbitBookPage page;
@@ -299,6 +315,10 @@ bool refresh(const StopCheck shouldStop, const CoverSizes& sizes) {
     const BookOrbitHomeShelf* kept = hadPrevious ? findShelf(*previous, shelf.source) : nullptr;
     // The server draws Discover anew on every request. Keeping a day's draw stops each
     // sync from costing a new set of covers. A failed listing leaves its shelf as it was.
+    if (shelf.source.kind == BookOrbitHomeShelfKind::NEW_ON_READER) {
+      fillNewBooksShelf(shelf);
+      continue;
+    }
     const bool keep = shelf.source.kind == BookOrbitHomeShelfKind::DISCOVER
                           ? next->fetchDay != 0 && previous->fetchDay == next->fetchDay
                           : !fetchShelf(shelf);

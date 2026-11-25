@@ -114,6 +114,7 @@ inline esp_sleep_wakeup_cause_t esp_sleep_get_wakeup_cause() { return ESP_SLEEP_
 #include "activities/settings/KOReaderSettingsActivity.h"
 #include "activities/settings/OtaUpdateActivity.h"
 #include "activities/settings/SdFirmwareUpdateActivity.h"
+#include "activities/util/DevicePinActivity.h"
 #include "components/UITheme.h"
 #include "components/icons/tablerFilledIcons.h"
 #include "fontIds.h"
@@ -126,9 +127,11 @@ inline esp_sleep_wakeup_cause_t esp_sleep_get_wakeup_cause() { return ESP_SLEEP_
 #include "simulator/SimulatorSmokeTest.h"
 #endif
 #include "util/BatteryDiagnosticLog.h"
+#include "util/BatteryUsage.h"
 #include "util/BookUpdateMigration.h"
 #include "util/ButtonNavigator.h"
 #include "util/ButtonShortcutController.h"
+#include "util/DevicePinStore.h"
 #include "util/Dictionary.h"
 #include "util/DictionaryRegistry.h"
 #include "util/FrontlightSchedule.h"
@@ -1263,6 +1266,8 @@ static void powerDownForDeepSleep() {
   // Last chance to sample: startDeepSleep() cuts the SD rail on X3, so nothing
   // can be written again until the next wake.
   BatteryDiagnosticLog::record(BatteryDiagnosticLog::Event::Sleep, BoardConfig::ACTIVE.name);
+  BatteryUsage::record(BatteryUsage::Event::Sleep, static_cast<uint8_t>(powerManager.getBatteryPercentage()),
+                       gpio.isUsbConnected());
   // All sleep-time file writes are complete. Stop SDMMC before the power path
   // cuts peripheral rails and isolates the bus pads; SPI boards are a no-op.
   libraryScanSleepToken.save(!library::libraryIndexNeedsRefresh());
@@ -1390,7 +1395,9 @@ void completeSleepAfterSleepSync() {
 void enterDeepSleep(bool fromTimeout) {
   HalPowerManager::Lock powerLock;  // Ensure we are at normal CPU frequency for sleep preparation
   HomeWifi::stop("going to sleep");
-  APP_STATE.lastSleepFromReader = activityManager.isReaderActivity();
+  // Asleep from the startup PIN lock: the book or Home it was guarding is still the
+  // place to wake into.
+  if (!activityManager.isDeviceLocked()) APP_STATE.lastSleepFromReader = activityManager.isReaderActivity();
   // A long-press sleep fires while Power is still down (see BOOKORBIT_SLEEP_SYNC_PAYLOAD_POWER_HELD).
   const bool powerHeldAtSleep = gpio.isPressed(HalGPIO::BTN_POWER);
 
@@ -1445,6 +1452,42 @@ void enterDeepSleep(bool fromTimeout) {
   }
 
   powerDownForDeepSleep();
+}
+
+// Where an ordinary boot lands once it is past the PIN lock (or straight away without
+// one). Kept as values so the lock can run it later, from its own loop.
+struct BootRoute {
+  bool toReader = false;
+  HalDisplay::RefreshMode homeRefreshMode = HalDisplay::FAST_REFRESH;
+  bool allowFastInitialReaderRefresh = false;
+};
+
+static void finishBootRoute(const BootRoute& route) {
+  if (!route.toReader || APP_STATE.openEpubPath.empty()) {
+    activityManager.goHome(HomeMenuItem::NONE, route.homeRefreshMode);
+    return;
+  }
+  // Clear app state to avoid getting into a boot loop if the epub doesn't load
+  const auto path = APP_STATE.openEpubPath;
+  APP_STATE.openEpubPath = "";
+  APP_STATE.readerActivityLoadCount++;
+  APP_STATE.saveToFile();
+  activityManager.goToReader(path, false, route.allowFastInitialReaderRefresh);
+}
+
+// On the PIN lock the Power button may sleep the device, refresh the panel or switch
+// the light, and nothing else: every other action would open a screen behind the lock.
+static bool isPowerActionAllowedWhileLocked(const CrossPointSettings::SHORT_PWRBTN action) {
+  switch (action) {
+    case CrossPointSettings::SHORT_PWRBTN::SLEEP:
+    case CrossPointSettings::SHORT_PWRBTN::SLEEP_ONLY:
+    case CrossPointSettings::SHORT_PWRBTN::WAKE_ONLY:
+    case CrossPointSettings::SHORT_PWRBTN::FORCE_REFRESH:
+    case CrossPointSettings::SHORT_PWRBTN::TOGGLE_FRONTLIGHT:
+      return true;
+    default:
+      return false;
+  }
 }
 
 void setupDisplayAndFonts(const bool seamless, const bool loadReaderResources, const bool useReaderRenderStack) {
@@ -1674,6 +1717,19 @@ void setup() {
   // Needs SETTINGS for the clock's UTC offset, so it cannot run any earlier.
   BatteryDiagnosticLog::record(BatteryDiagnosticLog::Event::Wake, BoardConfig::ACTIVE.name,
                                sleepSyncBoot ? "SleepSync" : wakeupRouteName(wakeupReason));
+  // Battery Use: the sleep sync's boot ends the awake stretch and starts its own; a wake
+  // from sleep (or from the sync) ends the stretch before it; a cold boot starts afresh.
+  // Other silent restarts are the same awake stretch going on.
+  {
+    const auto percent = static_cast<uint8_t>(powerManager.getBatteryPercentage());
+    if (sleepSyncBoot) {
+      BatteryUsage::record(BatteryUsage::Event::SyncStart, percent, gpio.isUsbConnected());
+    } else if (isSleepSyncWake || wakeupReason == HalGPIO::WakeupReason::PowerButton) {
+      BatteryUsage::record(BatteryUsage::Event::Wake, percent, gpio.isUsbConnected());
+    } else if (!isSilentReboot) {
+      BatteryUsage::record(BatteryUsage::Event::Wake, percent, gpio.isUsbConnected(), /*count=*/false);
+    }
+  }
   const bool isSleepWake = wakeupReason == HalGPIO::WakeupReason::PowerButton;
   I18N.setLanguage(static_cast<Language>(SETTINGS.language));
   // Normal boot store deferral adapted from Sichroteph/YACP commit
@@ -1947,23 +2003,36 @@ void setup() {
     // by network screens. Keep X3's existing full refresh behavior unchanged.
     const auto homeRefreshMode = gpio.deviceIsX3() ? HalDisplay::FULL_REFRESH : HalDisplay::HALF_REFRESH;
     activityManager.goHome(HomeMenuItem::NONE, homeRefreshMode);
-  } else if (APP_STATE.openEpubPath.empty() || !APP_STATE.lastSleepFromReader ||
-             mappedInputManager.isPressed(MappedInputManager::Button::Back) || APP_STATE.readerActivityLoadCount > 0) {
+  } else {
     // Boot to home screen if no book is open, last sleep was not from reader, back button is held, or reader activity
     // crashed (indicated by readerActivityLoadCount > 0)
+    BootRoute route;
+    route.toReader = !APP_STATE.openEpubPath.empty() && APP_STATE.lastSleepFromReader &&
+                     !mappedInputManager.isPressed(MappedInputManager::Button::Back) &&
+                     APP_STATE.readerActivityLoadCount == 0;
     // On X4, use the first Home paint to clean the retained sleep image.
-    const auto homeRefreshMode =
-        resume == BootResume::SplashlessWake && shouldClearX4WakeGhosting() && !x4WakeCanFastPaint
-            ? HalDisplay::HALF_REFRESH
-            : HalDisplay::FAST_REFRESH;
-    activityManager.goHome(HomeMenuItem::NONE, homeRefreshMode);
-  } else {
-    // Clear app state to avoid getting into a boot loop if the epub doesn't load
-    const auto path = APP_STATE.openEpubPath;
-    APP_STATE.openEpubPath = "";
-    APP_STATE.readerActivityLoadCount++;
-    APP_STATE.saveToFile();
-    activityManager.goToReader(path, false, allowFastInitialReaderRefresh);
+    route.homeRefreshMode = resume == BootResume::SplashlessWake && shouldClearX4WakeGhosting() && !x4WakeCanFastPaint
+                                ? HalDisplay::HALF_REFRESH
+                                : HalDisplay::FAST_REFRESH;
+    route.allowFastInitialReaderRefresh = allowFastInitialReaderRefresh;
+    if (!DevicePinStore::isSet()) {
+      finishBootRoute(route);
+    } else {
+      // The PIN lock paints first (cleaning the sleep image itself), so the screen it
+      // hands over to starts from the lock's frame, not from a restored sleep frame.
+      route.homeRefreshMode = HalDisplay::FAST_REFRESH;
+      route.allowFastInitialReaderRefresh = false;
+      auto lock = makeUniqueNoThrow<DevicePinActivity>(renderer, mappedInputManager, DevicePinActivity::Mode::Unlock,
+                                                       [route] { finishBootRoute(route); });
+      if (lock) {
+        activityManager.replaceActivity(std::move(lock));
+      } else {
+        // Without the memory for the lock screen nothing behind it can run either;
+        // sleeping keeps the device locked rather than opening it.
+        LOG_ERR("MAIN", "OOM: PIN lock (free=%u maxAlloc=%u); sleeping", ESP.getFreeHeap(), ESP.getMaxAllocHeap());
+        enterDeepSleep();
+      }
+    }
   }
 
   // The sleep sync paints nothing: the sleep screen stays on the panel.
@@ -2209,7 +2278,10 @@ void loop() {
       powerButtonReleasedSinceWake = true;
     }
   } else if (millis() >= allowSleepAt) {
-    const auto powerAction = getPowerButtonAction();
+    auto powerAction = getPowerButtonAction();
+    if (activityManager.isDeviceLocked() && !isPowerActionAllowedWhileLocked(powerAction)) {
+      powerAction = CrossPointSettings::SHORT_PWRBTN::IGNORE;
+    }
     if (powerAction == CrossPointSettings::SHORT_PWRBTN::QUICK_LOCK) {
       const bool longPower = gpio.getPowerButtonHeldTime() >= SETTINGS.getPowerButtonLongPressDuration();
       if (handleGlobalPowerButtonAction(powerAction,

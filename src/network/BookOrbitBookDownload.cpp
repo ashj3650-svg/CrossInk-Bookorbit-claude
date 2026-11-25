@@ -152,9 +152,11 @@ HttpDownloader::DownloadError BookOrbitBookDownload::transfer(const int64_t book
 }
 
 BookOrbitBookDownload::Result BookOrbitBookDownload::downloadBook(const int64_t bookId, std::string& outPath,
-                                                                  const HttpDownloader::CancelCallback& shouldCancel) {
+                                                                  const HttpDownloader::CancelCallback& shouldCancel,
+                                                                  std::string* outTitle) {
   BookOrbitBookDetail detail;
   if (!BookOrbitCatalogClient::fetchBookDetail(bookId, detail)) return Result::Unreachable;
+  if (outTitle) *outTitle = detail.title;
   BookOrbitCatalogFile epubFile;
   if (!hasEpubFile(detail, epubFile)) return Result::NoEpub;
 

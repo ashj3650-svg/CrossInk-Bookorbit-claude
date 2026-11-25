@@ -54,6 +54,8 @@ enum class SettingAction {
   DownloadFonts,
   TtfRendering,
   ClockSync,
+  BatteryUse,
+  DevicePin,
 };
 
 struct SettingInfo {
@@ -311,6 +313,8 @@ class SettingsActivity final : public Activity {
   void openScreenMarginPicker(const SettingInfo& setting);
   void openWordSpacingPicker();
   void openLanguagePicker();
+  void openDevicePinMenu();
+  void startDevicePinSetup();
   void openIdleTimeThresholdPicker();
   void toggleCurrentSetting();
   void openSleepTimeoutPicker();

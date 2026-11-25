@@ -15,6 +15,7 @@ Everything else — fonts, themes, reader features, reading stats, controls, the
 - **Offline shortcuts to your own books** — "On device" and "In progress" categories that open a book directly, without touching the network.
 - **Reading statistics pushed to BookOrbit** — your reading time, streaks and pace on the server's dashboard, fed by the pages you turn on the device.
 - **A working clock on the X4** — the status-bar clock, which upstream can only show on hardware that has a clock chip, plus an opt-in mode that keeps the time running through sleep.
+- **Reading and device extras** — a "Previously..." recap after time away, a pinned Peek Page, a sleep timer counted in chapters, Wi-Fi at Home, a startup PIN lock, Battery Use figures and a Search button on the BookOrbit Home (see [Extras](#extras) below).
 - **KOReader Sync is removed** — its screens, settings and shortcut are gone. The X3/X4 firmware gets a 6.5 MB partition, and this fork's BookOrbit layer plus CrossInk's own growth stopped fitting in it; dropping the second sync provider is what buys the room. Credentials already saved on the SD card are left alone, simply unread.
 
 BookOrbit exposes a KOReader-compatible sync API, so this fork talks to it the same way the official BookOrbit KOReader plugin does. Your BookOrbit server must be recent enough to serve the KOReader plugin endpoints under `{server}/api/v1/koreader` — including `plugin/catalog/*` for the catalog browser and `plugin/annotations/*` / `plugin/bookmarks/*` for highlight and bookmark sync (servers without those are detected, and the missing steps are simply skipped).
@@ -34,6 +35,32 @@ Choose **BookOrbit** in **Settings → Display → UI Theme**, and Home becomes 
 Left and Right turn pages, Up and Down move between tiles; on touch devices, swipe between pages and tap a tile. Opening Home never waits on the network: Sync on Sleep or the BookOrbit tile bring the server's numbers, reading done on the device counts straight away, and without an account the theme runs on your own numbers. The [reader features guide](docs/reader-features.md#bookorbit-home) has the details.
 
 _Screenshots taken in the simulator, with public-domain books from [Standard Ebooks](https://standardebooks.org)._
+
+---
+
+## Extras
+
+These come with v1.6.1+bookorbit.10. The [changelog](CHANGELOG.md) has the details of each.
+
+### Reading
+
+- **Previously...** — open a book you have not read for a few days and a card recalls the chapter, how long ago you read it and the last lines you read. Settings → Reader → Recap After Time Away sets the delay or turns it off.
+- **Peek Page** — pin one page, such as a map or a cast list, and jump to it and back from the reader menu's Location tab or a shortcut.
+- **Sleep at Chapter End** — from the reader menu's More tab, sleep after this chapter, 2 chapters or 3.
+
+### BookOrbit and Wi-Fi (X4 Classic, X4 Pro and reTerminal Sticky)
+
+- **Wi-Fi at Home** — Wi-Fi joins your network while Home shows and goes off in a book, on sleep, or after 10 idle minutes. Settings → System → Wi-Fi at Home.
+- **Sync on open** — opening a book with Wi-Fi at Home connected first fetches its latest BookOrbit position.
+- **Sleep sync for recent books** — the sync behind the sleep screen covers up to 10 recent books, and the most recently saved position wins.
+- **Download New Books** — the sleep sync downloads books newly added to your BookOrbit library (Settings → BookOrbit Sync). The **New on your reader** Home shelf lists the ones you have not opened yet.
+- **Background catalog downloads** — downloads from the catalog run while you keep browsing.
+
+### Device
+
+- **Device PIN** — Settings → System → Device → Device PIN sets a four-digit, numbers-only PIN asked for each time the reader is turned on or woken. On the PIN screen, Up/Right and Down/Left change the highlighted digit, Confirm moves on (and checks the PIN after the fourth digit), Back steps back. Forgot it? Delete `.crosspoint/device_pin.bin` from the SD card on a computer. The PIN locks the reader's screens; it does not encrypt the card.
+- **Search** — the BookOrbit Home's Search button (Up from the current book) opens the Library on its search keyboard; in the Library, Right is Search. Searches match titles, authors and series.
+- **Battery Use** — Settings → System → Device → Battery Use shows the drain asleep (per day), awake (per hour) and per sleep sync.
 
 ---
 

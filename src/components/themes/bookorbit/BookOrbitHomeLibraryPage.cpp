@@ -48,6 +48,8 @@ const freeink::Icon& shelfIcon(const BookOrbitHomeShelfKind kind) {
       return icon_home_collection_24;
     case BookOrbitHomeShelfKind::SMART_SCOPE:
       return icon_home_scope_24;
+    case BookOrbitHomeShelfKind::NEW_ON_READER:
+      return icon_home_cloud_down_24;
   }
   return icon_home_shuffle_24;
 }
@@ -57,6 +59,10 @@ void drawShelf(const BookOrbitHomePageContext& context, const Rect& tile, const 
   GfxRenderer& renderer = context.renderer;
   const BookOrbitHomeTiles& tiles = context.tiles;
   tiles.drawTileHeader(tile, BookOrbitHomeText::shelfTitle(shelf.source), &shelfIcon(shelf.source.kind));
+  if (shelf.count == 0 && shelf.source.kind == BookOrbitHomeShelfKind::NEW_ON_READER) {
+    tiles.drawTileFooter(tile, tr(STR_HOME_NO_NEW_BOOKS));
+    return;
+  }
 
   for (int i = 0; i < shelf.count; i++) {
     const BookOrbitHomeBook& book = shelf.books[i];

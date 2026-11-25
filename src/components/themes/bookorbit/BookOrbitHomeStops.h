@@ -23,6 +23,7 @@ class BookOrbitHomeStops {
     OpenSeries,
     OpenContinueReading,  // the catalog's books in progress
     Refresh,
+    OpenSearch,  // the Library's search, keyboard first
   };
   enum class Page : uint8_t { Home, Library, Stats, Count };
 
@@ -61,8 +62,8 @@ class BookOrbitHomeStops {
   void movePage(int delta);
 
  private:
-  // The most stops the fullest page set can hold: Home 6, Library 12, Stats 3.
-  static constexpr int MAX_STOPS = 21;
+  // The most stops the fullest page set can hold: Home 7, Library 12, Stats 3.
+  static constexpr int MAX_STOPS = 22;
 
   std::array<Stop, MAX_STOPS> stops{};
   std::array<uint8_t, static_cast<size_t>(Page::Count) + 1> pageFirstStop{};

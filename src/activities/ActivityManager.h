@@ -152,7 +152,8 @@ class ActivityManager {
   void goToNearbyBookReceive();
   void goToSettings(bool dismissOnUpSwipe = false);
   void goToFileBrowser(std::string path = {});
-  void goToLibrary();
+  // startWithSearch opens the Library on its search keyboard.
+  void goToLibrary(bool startWithSearch = false);
   void goToBrowser();
   bool goToOpdsServer(uint32_t serverIndex, bool networkBootReady = false);
   // networkBootReady: called from the catalog's own minimal network boot; otherwise the
@@ -190,6 +191,7 @@ class ActivityManager {
   bool blocksGlobalInput() const;
   bool isHomeActivity() const;
   bool isReaderActivity() const;
+  bool isDeviceLocked() const;
   bool openReaderSettingsForTouchscreenEscapeHatch();
   bool handleHomeButtonBackOrHome();
   bool openReaderMenuFromShortcut();

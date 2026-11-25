@@ -38,6 +38,7 @@ void formatHours(const uint32_t hours, char* out, const size_t outSize) {
 StrId shelfKindName(const BookOrbitHomeShelfKind kind) {
   if (kind == BookOrbitHomeShelfKind::RECENTLY_ADDED) return StrId::STR_HOME_RECENTLY_ADDED;
   if (kind == BookOrbitHomeShelfKind::WANT_TO_READ) return StrId::STR_BOOKORBIT_WANT_TO_READ;
+  if (kind == BookOrbitHomeShelfKind::NEW_ON_READER) return StrId::STR_HOME_NEW_ON_READER;
   return StrId::STR_HOME_DISCOVER;
 }
 

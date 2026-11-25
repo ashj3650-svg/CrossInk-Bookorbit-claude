@@ -13,6 +13,7 @@
 #include "BookOrbitCredentialStore.h"
 #include "BookOrbitDownloadIndex.h"
 #include "activities/home/RecentBookProgress.h"
+#include "util/BookOrbitNewBooks.h"
 #include "util/CardSpace.h"
 
 namespace {
@@ -23,6 +24,25 @@ uint8_t onCardMask(const BookOrbitHomeBook* books, const int count) {
     if (BookOrbitDownloadIndex::lookup(books[i].id, path)) mask |= static_cast<uint8_t>(1u << i);
   }
   return mask;
+}
+
+// A New on your reader shelf as of the last sync, less the books opened since: the reader
+// takes a book off the list as it opens it, and Home should not wait for the next sync.
+void dropOpenedNewBooks(BookOrbitHomeSnapshot& snapshot) {
+  BookOrbitNewBooks::Book unopened[BookOrbitNewBooks::MAX_BOOKS];
+  int unopenedCount = -1;  // read once, on the first such shelf
+  for (int s = 0; s < BookOrbitHomeSnapshot::SHELVES; s++) {
+    BookOrbitHomeShelf& shelf = snapshot.shelves[s];
+    if (shelf.source.kind != BookOrbitHomeShelfKind::NEW_ON_READER || shelf.count == 0) continue;
+    if (unopenedCount < 0) unopenedCount = BookOrbitNewBooks::load(unopened);
+    int kept = 0;
+    for (int i = 0; i < shelf.count; i++) {
+      bool stillNew = false;
+      for (int j = 0; j < unopenedCount && !stillNew; j++) stillNew = unopened[j].id == shelf.books[i].id;
+      if (stillNew) shelf.books[kept++] = shelf.books[i];
+    }
+    shelf.count = static_cast<uint8_t>(kept);
+  }
 }
 
 // Counting the used space froze Home at every start on slow FAT32 cards (#110), so only
@@ -60,6 +80,7 @@ void BookOrbitHomeModel::load(const BookOrbitHomeSource& source, const bool trac
   if (hasAccount) {
     snapshot = makeUniqueNoThrow<BookOrbitHomeSnapshot>();
     if (snapshot && !BookOrbitHomeStore::load(*snapshot)) snapshot.reset();
+    if (snapshot) dropOpenedNewBooks(*snapshot);
   }
 
   // Only the index header is read: the count as of the Library's last scan, no card walk.
