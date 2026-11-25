@@ -36,7 +36,9 @@ push and on CI.
   bookmarks on a subset of books. It also uploads the non-EPUB records the
   catalog must hide or keep: an audiobook-only book (a generated silent MP3)
   that shares an EPUB's title and author, and an audio file attached to
-  another EPUB. Both are marked as being read. Two-device scenarios use this synthetic
+  another EPUB. Both are marked as being read. Three books are numbered 1-3 in the
+  series "Integration Saga" through the server's metadata API, for the End-of-Book
+  next-in-series scenarios. Two-device scenarios use this synthetic
   device as the "other" reader — the simulator's MAC is fixed, so two real
   simulator instances would share one device id.
 - **Harness**: [harness/run_scenarios.py](harness/run_scenarios.py) prepares an

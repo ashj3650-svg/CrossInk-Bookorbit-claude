@@ -49,6 +49,10 @@ NAMING_PATTERN = "Catalog/{authors:first}/{authors:first} - {title}"
 # The SmartScope the catalog's smart-scopes section is browsed through; it mirrors
 # the collection above, so both sections list the same books by different means.
 SMART_SCOPE_NAME = "Integration Scope"
+# A numbered series set on the server for the End-of-Book "next in series" scenarios. The
+# EPUBs carry no series themselves: scenarios put a numbered copy of the first on the card.
+SERIES_NAME = "Integration Saga"
+IN_SERIES = range(64, 67)
 # Non-EPUB records, outside every other seeded range: the audiobook-only book
 # copies this EPUB's title and author, the way a library holds a novel and its
 # audiobook as separate records; the mixed-format book gets an audio file too.
@@ -200,6 +204,18 @@ def main() -> int:
         [{"type": "rule", "field": "collection", "operator": "includesAny", "value": ["Integration Shelf"]}])
     print(f"SmartScope {scope_id} ({SMART_SCOPE_NAME}) in place")
 
+    # The series, numbered in library order.
+    series_books = [books[i] for i in IN_SERIES]
+    series_names = {b["title"]: [b["title"], Path(b["file"]).stem] for b in series_books}
+    series_ids = admin.find_book_ids([n for pair in series_names.values() for n in pair])
+    for number, (title, candidates) in enumerate(series_names.items(), start=1):
+        book_id = next((series_ids[n] for n in candidates if n in series_ids), None)
+        if book_id is None:
+            print(f"Book '{title}' not found on the server; cannot build the series", file=sys.stderr)
+            return 1
+        admin.set_series(book_id, SERIES_NAME, number)
+    print(f"Series '{SERIES_NAME}' set on {len(series_books)} books")
+
     # The account's KOReader file naming template. Catalog downloads must follow it,
     # so it deliberately asks for a folder the SD card does not have yet and for a
     # name unlike the "Title - Author.epub" this firmware used to hardcode.
@@ -222,6 +238,7 @@ def main() -> int:
                      "smart_scope": {"id": scope_id, "name": SMART_SCOPE_NAME,
                                      "books": collection_books},
                      "naming_pattern": NAMING_PATTERN,
+                     "series": {"name": SERIES_NAME, "books": series_books},
                      "non_epub": non_epub}
 
     for i in WITH_PROGRESS:

@@ -9,6 +9,8 @@ on; for everything inherited from upstream, see the
 
 ### Added
 
+- Next in series at the end of a book: when the book you finished is numbered in a series (as the Library's Series order shows it), the End-of-Book screen first offers the next book of the series. When it is on the card, wherever it is filed, "Next in series: <title>" opens it. When it is not, or the card skips a number, "Get the next in series from BookOrbit" connects, finds the book numbered next in that series on your BookOrbit server, downloads it and opens it (if it is already on the card it just opens). The books after this one in its folder still follow below.
+
 - A Wi-Fi icon next to the battery at the top of Home and the other screens outside the reader while the reader is connected to a network.
 - The file transfer web page is always there while Wi-Fi at Home is connected (X4 Classic, X4 Pro and reTerminal Sticky): open http://crosspoint.local/ or the reader's IP address in a browser, with no File Transfer screen. WebDAV and the Calibre plugin reach the reader the same way. It stops when you open a book or another screen, and while a file arrives the reader stays awake.
 

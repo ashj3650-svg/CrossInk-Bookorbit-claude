@@ -23,6 +23,7 @@
 #include "LibraryFileTypes.h"
 #include "LibraryIndexFile.h"
 #include "LibraryMetadataCache.h"
+#include "LibrarySeries.h"
 #include "LibrarySort.h"
 #include "LibraryText.h"
 
@@ -78,23 +79,6 @@ struct StagedEntry {
   char genre[STAGE_METADATA_BYTES];
 };
 constexpr size_t STAGE_STRIDE = sizeof(StagedEntry);
-
-// Flip the sign half of IEEE-754 so u32 order matches signed numeric order.
-// The all-ones value is reserved for missing or malformed metadata.
-uint32_t parseSeriesPosition(const std::string& text) {
-  static_assert(std::numeric_limits<float>::is_iec559, "series positions require IEEE-754 floats");
-  if (text.empty()) return CLIX_UNKNOWN_SERIES_POSITION;
-  char* end = nullptr;
-  const float value = std::strtof(text.c_str(), &end);
-  const bool parsed = end != text.c_str();
-  while (std::isspace(static_cast<unsigned char>(*end))) ++end;
-  if (!parsed || *end != '\0' || !std::isfinite(value)) return CLIX_UNKNOWN_SERIES_POSITION;
-  uint32_t bits = 0;
-  static_assert(sizeof(bits) == sizeof(value), "series position needs a 32-bit float");
-  const float normalized = value == 0 ? 0 : value;  // -0 and +0 have the same order.
-  memcpy(&bits, &normalized, sizeof(bits));
-  return bits & 0x80000000u ? ~bits : bits ^ 0x80000000u;
-}
 
 // Sort array element. Holding a 12-byte key segment rather than the whole fold
 // keeps this at 14 bytes per book. Equal-prefix runs are refined from the

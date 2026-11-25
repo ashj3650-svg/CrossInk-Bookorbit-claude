@@ -268,6 +268,10 @@ class AdminClient:
         request_json("PUT", self.api("/koreader/file-naming-pattern"), self._headers(),
                      {"pattern": pattern}, ok=(200,))
 
+    def set_series(self, book_id: int, name: str, number: int) -> None:
+        request_json("PATCH", self.api(f"/books/{book_id}/metadata"), self._headers(),
+                     {"seriesName": name, "seriesIndex": str(number)}, ok=(200, 201, 204))
+
     def ensure_collection(self, name: str, icon: str, book_ids: list[int]) -> int:
         """Create a collection holding ``book_ids``, or return the existing one by name."""
         for collection in request_json("GET", self.api("/collections"), self._headers(), ok=(200,)):

@@ -1,4 +1,5 @@
 #pragma once
+#include <cmath>
 #include <cstdint>
 #include <string>
 #include <vector>
@@ -39,6 +40,8 @@ struct BookOrbitCatalogBook {
   // unknown) under the date-added sort.
   std::string series;
   uint32_t addedAt = 0;
+  // Its number in a series listing (the series sort, or a series filter); NAN when it has none.
+  float seriesIndex = NAN;
 };
 
 /** Where a letter starts in a listing sorted by title or author, as the server ranks it. */

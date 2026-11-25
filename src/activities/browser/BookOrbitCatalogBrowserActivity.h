@@ -131,7 +131,13 @@ class BookOrbitCatalogBrowserActivity final : public Activity {
   // The book a sync sent this session to update (BookOrbitCatalogLink::replacePath): the
   // session ends by reopening it rather than on Home, the download done or not.
   std::string reopenPath;
+  // The End-of-Book screen sent this session for the next book of a series: once on the
+  // card, that book opens.
+  bool openDownloaded = false;
   void leaveCatalog();
+  // Finds the book numbered next after `after` in the series on the server, then opens
+  // it when it is on the card or downloads and opens it.
+  void downloadNextInSeries(const std::string& series, float after);
 
   // Current book-list context, used to page and to return to the same list after a download.
   BookOrbitBookQuery listQuery;

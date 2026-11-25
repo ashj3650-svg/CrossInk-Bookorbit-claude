@@ -14,6 +14,7 @@
 #include <atomic>
 #include <cctype>
 #include <cstdio>
+#include <cstdlib>
 #include <cstring>
 
 #include "BookOrbitCredentialStore.h"
@@ -284,6 +285,17 @@ uint32_t parseUtcTimestamp(const char* text) {
   return static_cast<uint32_t>(days) * 86400u + static_cast<uint32_t>(hour * 3600 + minute * 60 + second);
 }
 
+// A series number, which servers send as a string ("2", "2.5") or a number; NAN for none.
+float seriesNumber(JsonVariantConst value) {
+  if (value.isNull()) return NAN;
+  if (!value.is<const char*>()) return value.as<float>();
+  const char* text = value.as<const char*>();
+  if (!*text) return NAN;
+  char* end = nullptr;
+  const float number = strtof(text, &end);
+  return end == text ? NAN : number;
+}
+
 // The book fields every listing row carries; the ones a sort needs come from the caller.
 BookOrbitCatalogBook bookFromItem(JsonObjectConst item) {
   BookOrbitCatalogBook book;
@@ -512,6 +524,7 @@ bool BookOrbitCatalogClient::fetchBooks(const BookOrbitBookQuery& query, const i
 
   const std::string sort = query.sort.empty() ? "recently_added" : query.sort;
   const bool bySeries = sort == "series";
+  const bool inSeries = bySeries || !query.series.empty() || !query.seriesId.empty();
   const bool byDateAdded = sort == "recently_added";
   const bool withLetters = page == 1 && (sort == "title" || sort == "author");
   const std::string url = booksUrl(query, page, PAGE_SIZE, withLetters);
@@ -521,6 +534,7 @@ bool BookOrbitCatalogClient::fetchBooks(const BookOrbitBookQuery& query, const i
                      R"({"page":true,"total":true,"size":true,"items":[{"id":true,"title":true,"authors":true}]})");
   // Only what the sort's list sections need: a series name per row costs heap.
   if (bySeries) filter["items"][0]["seriesName"] = true;
+  if (inSeries) filter["items"][0]["seriesIndex"] = true;
   if (byDateAdded) filter["items"][0]["addedAt"] = true;
   if (withLetters) {
     filter["buckets"][0]["key"] = true;
@@ -537,6 +551,7 @@ bool BookOrbitCatalogClient::fetchBooks(const BookOrbitBookQuery& query, const i
   for (JsonObjectConst item : doc["items"].as<JsonArrayConst>()) {
     BookOrbitCatalogBook book = bookFromItem(item);
     if (bySeries) book.series = std::string(item["seriesName"] | "");
+    if (inSeries) book.seriesIndex = seriesNumber(item["seriesIndex"]);
     if (byDateAdded) book.addedAt = parseUtcTimestamp(item["addedAt"] | "");
     outPage.books.push_back(std::move(book));
   }

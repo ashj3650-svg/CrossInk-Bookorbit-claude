@@ -3114,6 +3114,92 @@ def scenario_book_update_offer(verbose: bool) -> None:
     assert text in texts, f"the highlight was not sent after the update: {texts}"
 
 
+def numbered_copy(source: Path, dest: Path, series: str, number: int) -> None:
+    """A copy of a library book whose OPF numbers it in a series, as Calibre writes it. The
+    server's own copies carry no series: seed.py sets theirs through its API."""
+    dest.parent.mkdir(parents=True, exist_ok=True)
+    meta = (f'<meta name="calibre:series" content="{series}"/>'
+            f'<meta name="calibre:series_index" content="{number}"/></metadata>').encode()
+    with zipfile.ZipFile(source) as src, zipfile.ZipFile(dest, "w") as out:
+        for info in src.infolist():
+            data = src.read(info.filename)
+            if info.filename.endswith(".opf"):
+                data = data.replace(b"</metadata>", meta, 1)
+            out.writestr(info, data, compress_type=info.compress_type)
+
+
+def finish_book(fs: SimFs, sim_path: str, source: Path) -> None:
+    """Asleep on the book's End-of-Book screen: its progress one past the last chapter."""
+    fs.set_asleep_in_book(sim_path)
+    write_progress_bin(fs.epub_cache_dir(sim_path) / "progress.bin", len(epub_spine_entries(source)), 0, 1)
+
+
+def open_book_after(fs: SimFs) -> str:
+    return json.loads((fs.crosspoint / "state.json").read_text()).get("openEpubPath", "")
+
+
+def scenario_series_next_on_card(verbose: bool) -> None:
+    """The End-of-Book screen's first row is the series' next book when the card has it,
+    found through the Library index wherever it is filed, ahead of the book after this one
+    in its folder; Confirm opens it."""
+    manifest, library = load_seed()
+    series = manifest["series"]["name"]
+    with tempfile.TemporaryDirectory(prefix="crossink-integ-") as tmp:
+        fs = SimFs(Path(tmp), manifest["kosync"])
+        first = fs.fs / "books" / "a-first.epub"
+        numbered_copy(INTEGRATION / "library" / library[64]["file"], first, series, 1)
+        numbered_copy(INTEGRATION / "library" / library[65]["file"], fs.fs / "Saga" / "second.epub", series, 2)
+        # Alphabetically next in the first book's folder, which the series row comes before.
+        shutil.copy2(INTEGRATION / "library" / library[66]["file"], fs.fs / "books" / "b-other.epub")
+
+        # Home menu -> Library, whose first open builds the index the lookup reads (in any
+        # order but Recently Read, which needs no index).
+        (fs.crosspoint / "crossink-settings.json").write_text(json.dumps({"librarySortMethod": 1}))
+        run_simulator(fs, input_script="3000:DOWN:120;3600:CONFIRM:120;12000:QUIT", choice="none",
+                      timeout_s=30, verbose=verbose)
+        assert (fs.crosspoint / "library.idx").exists(), "the Library built no index"
+
+        finish_book(fs, "/books/a-first.epub", first)
+        run_simulator(fs, input_script="6000:CONFIRM:120;10000:QUIT", choice="none", timeout_s=30,
+                      verbose=verbose, wake_into_reader=True)
+        assert open_book_after(fs) == "/Saga/second.epub", f"opened {open_book_after(fs)!r}, not the next in series"
+
+
+def scenario_series_next_download(verbose: bool) -> None:
+    """With the series' next book not on the card, the End-of-Book screen offers it from
+    BookOrbit: Confirm looks the series up, downloads the book numbered next and opens it."""
+    manifest, library = load_seed()
+    series = manifest["series"]["name"]
+    sim = KosyncDevice(BASE_URL, manifest["kosync"]["username"], manifest["kosync"]["password"], SIM_DEVICE_ID)
+    next_id = next(item["id"] for item in sim.catalog_manifest()
+                   for f in item["files"] if f["fileHash"] == library[65]["hash"])
+    with tempfile.TemporaryDirectory(prefix="crossink-integ-") as tmp:
+        fs = SimFs(Path(tmp), manifest["kosync"])
+        first = fs.fs / "books" / "a-first.epub"
+        numbered_copy(INTEGRATION / "library" / library[64]["file"], first, series, 1)
+        finish_book(fs, "/books/a-first.epub", first)
+
+        # The download ends in a restart into the reader, which the second script quits.
+        output = run_simulator(fs, input_script="6000:CONFIRM:120", choice="none", timeout_s=90,
+                               verbose=verbose, wake_into_reader=True, after_reboot_script="8000:QUIT")
+        index = {i: p for i, p, _ in read_download_index(fs.fs / DOWNLOAD_INDEX)}
+        assert next_id in index, f"book {next_id} was not downloaded: {index}\n" + "\n".join(
+            line for line in output.splitlines() if "BookOrbit" in line)[-2000:]
+        assert (fs.fs / index[next_id].lstrip("/")).exists(), "the download index points at no file"
+        assert open_book_after(fs) == index[next_id], f"opened {open_book_after(fs)!r}, not the download"
+
+    # After the series' last book, the lookup finds nothing and downloads nothing.
+    with tempfile.TemporaryDirectory(prefix="crossink-integ-") as tmp:
+        fs = SimFs(Path(tmp), manifest["kosync"])
+        last = fs.fs / "books" / "c-last.epub"
+        numbered_copy(INTEGRATION / "library" / library[66]["file"], last, series, 3)
+        finish_book(fs, "/books/c-last.epub", last)
+        output = run_simulator(fs, input_script="6000:CONFIRM:120;12000:QUIT", choice="none", timeout_s=30,
+                               verbose=verbose, wake_into_reader=True)
+        assert f'No book after #3 in series "{series}"' in output, "the lookup did not come back empty"
+        assert "Downloading file" not in output, "a book was downloaded after the series' last"
+
+
 SCENARIOS = {
     "catalog_collections_browse": scenario_catalog_collections_browse,
     "catalog_empty_listing_back": scenario_catalog_empty_listing_back,
@@ -3166,6 +3252,8 @@ SCENARIOS = {
     "web_move_keeps_book_state": scenario_web_move_keeps_book_state,
     "book_update_carries_state": scenario_book_update_carries_state,
     "book_update_offer": scenario_book_update_offer,
+    "series_next_on_card": scenario_series_next_on_card,
+    "series_next_download": scenario_series_next_download,
 }
 
 

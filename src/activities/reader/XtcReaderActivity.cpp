@@ -267,6 +267,9 @@ void XtcReaderActivity::loop() {
     case EndOfBookOptions::Action::GoHome:
       onGoHome();
       return;
+    case EndOfBookOptions::Action::FindNextInSeries:
+      endOfBookOptions->findNextOnBookOrbit();
+      return;
     case EndOfBookOptions::Action::LastPage:
     case EndOfBookOptions::Action::Redraw:
       if (endOfBookNeedsUpdate) {
