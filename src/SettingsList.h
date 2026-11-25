@@ -21,6 +21,7 @@
 #include "QuickActions.h"
 #include "activities/settings/SettingsActivity.h"
 #include "components/UITheme.h"
+#include "network/HomeWifi.h"
 #include "util/Dictionary.h"
 #include "util/DictionaryRegistry.h"
 #include "util/FontFamilyLabel.h"
@@ -595,7 +596,8 @@ inline SettingInfo buildSideButtonActionSetting(const StrId nameId, uint8_t Cros
 // can use it directly; mutable device UI lists use getSettingsList(), which
 // returns an owned copy and can add SD-card font and dictionary options.
 // The count is this fork's: upstream's entries plus the seven BookOrbit ones, the clock
-// latch toggle and the release-candidate update toggle. Nine gesture entries (two-finger and edge) are compiled only
+// latch toggle, the release-candidate update toggle and the recap toggle, plus Wi-Fi at Home on boards with PSRAM.
+// Nine gesture entries (two-finger and edge) are compiled only
 // for touch devices, the five KOReader account entries only with its build switch, and two tilt entries are added at
 // run time on boards with the sensor.
 #if CROSSINK_APP_CAP_KOREADER_SYNC
@@ -604,7 +606,7 @@ inline constexpr size_t BASE_SETTINGS_KOREADER_ENTRIES = 5;
 inline constexpr size_t BASE_SETTINGS_KOREADER_ENTRIES = 0;
 #endif
 inline constexpr size_t BASE_SETTINGS_CAPACITY =
-    102 + 2 + (CROSSINK_APP_CAP_TOUCH ? 9 : 0) + BASE_SETTINGS_KOREADER_ENTRIES;
+    102 + 3 + (CROSSINK_APP_HOME_WIFI ? 1 : 0) + (CROSSINK_APP_CAP_TOUCH ? 9 : 0) + BASE_SETTINGS_KOREADER_ENTRIES;
 
 const std::vector<SettingInfo>& getBaseSettingsList();
 
@@ -782,7 +784,7 @@ inline void addSettingByName(std::vector<SettingInfo>& target, const std::vector
 
 inline std::vector<SettingInfo> buildReaderSettingsParentList(const std::vector<SettingInfo>& allSettings) {
   std::vector<SettingInfo> readerSettings;
-  readerSettings.reserve(12);
+  readerSettings.reserve(13);
   readerSettings.push_back(SettingInfo::Submenu(StrId::STR_READER_FONT_OPTIONS, SettingAction::ReaderFontOptions));
   readerSettings.push_back(SettingInfo::Submenu(StrId::STR_READER_PAGE_LAYOUT, SettingAction::ReaderPageLayout));
   readerSettings.push_back(SettingInfo::Action(StrId::STR_STATUS_BARS, SettingAction::CustomiseStatusBar));
@@ -794,6 +796,7 @@ inline std::vector<SettingInfo> buildReaderSettingsParentList(const std::vector<
   addSettingByName(readerSettings, allSettings, StrId::STR_GUIDE_READING);
   addSettingByName(readerSettings, allSettings, StrId::STR_DICTIONARY);
   addSettingByName(readerSettings, allSettings, StrId::STR_INDEXING_METHOD);
+  addSettingByName(readerSettings, allSettings, StrId::STR_RECAP_AFTER_AWAY);
   return readerSettings;
 }
 
@@ -1058,11 +1061,12 @@ inline std::vector<SettingInfo> buildDisplaySleepSettingsList(const std::vector<
 
 inline std::vector<SettingInfo> buildSystemSettingsParentList(const std::vector<SettingInfo>& allSettings) {
   std::vector<SettingInfo> systemSettings;
-  systemSettings.reserve(10);
+  systemSettings.reserve(11);
   systemSettings.push_back(SettingInfo::Submenu(StrId::STR_SYSTEM_DEVICE, SettingAction::SystemDevice));
   systemSettings.push_back(SettingInfo::Submenu(StrId::STR_SYSTEM_FILES_CACHE, SettingAction::SystemFilesCache));
   systemSettings.push_back(SettingInfo::Submenu(StrId::STR_READING_STATS, SettingAction::SystemReadingStats));
   systemSettings.push_back(SettingInfo::Action(StrId::STR_WIFI_NETWORKS, SettingAction::Network));
+  addSettingByName(systemSettings, allSettings, StrId::STR_WIFI_AT_HOME);
 #if CROSSINK_APP_CAP_KOREADER_SYNC
   systemSettings.push_back(SettingInfo::Action(StrId::STR_KOREADER_SYNC, SettingAction::KOReaderSync));
 #endif

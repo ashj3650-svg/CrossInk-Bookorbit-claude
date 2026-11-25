@@ -512,6 +512,9 @@ class CrossPointSettings : public PersistableStore<CrossPointSettings> {
   // for a clock that survives sleep, and boards with a real RTC (X3) do not need it.
   // See HalPowerManager::startDeepSleep.
   uint8_t keepClockInSleep = 0;
+  // Wi-Fi at Home (HomeWifi): join a saved network in the background while Home shows.
+  // Boards without PSRAM never offer it.
+  uint8_t wifiAtHome = 1;
   // Let Check for Updates offer this fork's release candidates (GitHub pre-releases) as well
   // as its final releases. Off by default: candidates are test builds.
   uint8_t otaIncludePrereleases = 0;

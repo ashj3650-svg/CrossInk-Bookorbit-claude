@@ -117,6 +117,7 @@ inline esp_sleep_wakeup_cause_t esp_sleep_get_wakeup_cause() { return ESP_SLEEP_
 #include "components/UITheme.h"
 #include "components/icons/tablerFilledIcons.h"
 #include "fontIds.h"
+#include "network/HomeWifi.h"
 #include "network/UsbSerialFileTransfer.h"
 #ifdef SIMULATOR
 #include <SimulatorLifecycle.h>
@@ -1388,6 +1389,7 @@ void completeSleepAfterSleepSync() {
 // Enter deep sleep mode
 void enterDeepSleep(bool fromTimeout) {
   HalPowerManager::Lock powerLock;  // Ensure we are at normal CPU frequency for sleep preparation
+  HomeWifi::stop("going to sleep");
   APP_STATE.lastSleepFromReader = activityManager.isReaderActivity();
   // A long-press sleep fires while Power is still down (see BOOKORBIT_SLEEP_SYNC_PAYLOAD_POWER_HELD).
   const bool powerHeldAtSleep = gpio.isPressed(HalGPIO::BTN_POWER);
@@ -2257,6 +2259,7 @@ void loop() {
   mappedInputManager.clearDeferredHomeGesture();
 #endif
   const unsigned long activityDuration = millis() - activityStartTime;
+  HomeWifi::tick(activityManager.isHomeActivity(), millis() - lastActivityTime);
 
 #ifdef SIMULATOR
   runSimulatorSmokeTestTick();

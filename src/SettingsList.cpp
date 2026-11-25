@@ -273,6 +273,10 @@ const std::vector<SettingInfo>& getBaseSettingsList() {
                            "readingIdleTimeThresholdUnits", StrId::STR_CAT_SYSTEM));
     add(SettingInfo::Toggle(StrId::STR_TRACK_READING_STATS, &CrossPointSettings::trackReadingStats, "trackReadingStats",
                             StrId::STR_CAT_SYSTEM));
+#if CROSSINK_APP_HOME_WIFI
+    add(SettingInfo::Toggle(StrId::STR_WIFI_AT_HOME, &CrossPointSettings::wifiAtHome, "wifiAtHome",
+                            StrId::STR_CAT_SYSTEM));
+#endif
     add(SettingInfo::Toggle(StrId::STR_OTA_INCLUDE_PRERELEASES, &CrossPointSettings::otaIncludePrereleases,
                             "otaIncludePrereleases", StrId::STR_CAT_SYSTEM));
 

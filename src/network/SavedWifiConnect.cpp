@@ -21,40 +21,18 @@ constexpr uint32_t MIN_MAX_ALLOC_TO_START_WIFI = 24U * 1024U;
 constexpr unsigned long SCAN_TIMEOUT_MS = 10000;
 constexpr unsigned long POLL_MS = 50;
 
-bool isJoinFailure(const wl_status_t status) {
-  if (status == WL_CONNECT_FAILED || status == WL_NO_SSID_AVAIL) return true;
-#ifndef SIMULATOR
-  return status == WL_CONNECTION_LOST;
-#else
-  return false;
-#endif
-}
-
 bool join(const WifiCredential& credential, const SavedWifiConnect::StopCheck shouldStop) {
-  LOG_INF("WIFI", "Joining saved network %s in the background", credential.ssid.c_str());
-  if (!WiFi.disconnect(false, false, 1000)) {
-    LOG_DBG("WIFI", "Disconnect before begin timed out; continuing with begin");
-  }
-  delay(100);
-  WiFi.setScanMethod(WIFI_ALL_CHANNEL_SCAN);
-  WiFi.setSortMethod(WIFI_CONNECT_AP_BY_SIGNAL);
-  if (credential.password.empty()) {
-    WiFi.begin(credential.ssid.c_str());
-  } else {
-    WiFi.begin(credential.ssid.c_str(), credential.password.c_str());
-  }
+  SavedWifiConnect::beginJoin(credential);
 
   const unsigned long start = millis();
   wl_status_t status = WiFi.status();
   while (millis() - start < JOIN_TIMEOUT_MS && !shouldStop()) {
     status = WiFi.status();
     if (status == WL_CONNECTED) {
-      LOG_INF("WIFI", "Joined %s (rssi=%d)", credential.ssid.c_str(), WiFi.RSSI());
-      // Next time, the network that answered here is the first one tried.
-      WIFI_STORE.setLastConnectedSsid(credential.ssid);
+      SavedWifiConnect::rememberJoined(credential.ssid);
       return true;
     }
-    if (isJoinFailure(status)) break;
+    if (SavedWifiConnect::isJoinFailure(status)) break;
     delay(POLL_MS);
   }
   if (shouldStop()) {
@@ -121,6 +99,27 @@ bool SavedWifiConnect::connect(const StopCheck shouldStop) {
     LOG_INF("WIFI", "No saved network to join in the background");
     return false;
   }
+  if (!startStation()) return false;
+
+  const std::string lastSsid = WIFI_STORE.getLastConnectedSsid();
+  if (!lastSsid.empty()) {
+    const auto credential = WIFI_STORE.findCredential(lastSsid);
+    if (credential && join(*credential, shouldStop)) return true;
+  }
+  if (shouldStop()) return false;
+
+  std::vector<VisibleNetwork> visible;
+  if (!scanSavedNetworks(lastSsid, shouldStop, visible)) return false;
+  for (const VisibleNetwork& network : visible) {
+    if (shouldStop()) return false;
+    const auto credential = WIFI_STORE.findCredential(network.ssid);
+    if (credential && join(*credential, shouldStop)) return true;
+  }
+  LOG_INF("WIFI", "No saved network joined in the background (%u visible)", static_cast<unsigned>(visible.size()));
+  return false;
+}
+
+bool SavedWifiConnect::startStation() {
   if (WiFi.getMode() == WIFI_OFF &&
       (ESP.getFreeHeap() < MIN_FREE_HEAP_TO_START_WIFI || ESP.getMaxAllocHeap() < MIN_MAX_ALLOC_TO_START_WIFI)) {
     LOG_ERR("WIFI", "Refusing to start WiFi on low memory: free=%u maxAlloc=%u", ESP.getFreeHeap(),
@@ -140,23 +139,36 @@ bool SavedWifiConnect::connect(const StopCheck shouldStop) {
   snprintf(hostname, sizeof(hostname), "CrossPoint-Reader-%02X%02X%02X%02X%02X%02X", mac[0], mac[1], mac[2], mac[3],
            mac[4], mac[5]);
   WiFi.setHostname(hostname);
+  return true;
+}
 
-  const std::string lastSsid = WIFI_STORE.getLastConnectedSsid();
-  if (!lastSsid.empty()) {
-    const auto credential = WIFI_STORE.findCredential(lastSsid);
-    if (credential && join(*credential, shouldStop)) return true;
+void SavedWifiConnect::beginJoin(const WifiCredential& credential) {
+  LOG_INF("WIFI", "Joining saved network %s in the background", credential.ssid.c_str());
+  if (!WiFi.disconnect(false, false, 1000)) {
+    LOG_DBG("WIFI", "Disconnect before begin timed out; continuing with begin");
   }
-  if (shouldStop()) return false;
+  delay(100);
+  WiFi.setScanMethod(WIFI_ALL_CHANNEL_SCAN);
+  WiFi.setSortMethod(WIFI_CONNECT_AP_BY_SIGNAL);
+  if (credential.password.empty()) {
+    WiFi.begin(credential.ssid.c_str());
+  } else {
+    WiFi.begin(credential.ssid.c_str(), credential.password.c_str());
+  }
+}
 
-  std::vector<VisibleNetwork> visible;
-  if (!scanSavedNetworks(lastSsid, shouldStop, visible)) return false;
-  for (const VisibleNetwork& network : visible) {
-    if (shouldStop()) return false;
-    const auto credential = WIFI_STORE.findCredential(network.ssid);
-    if (credential && join(*credential, shouldStop)) return true;
-  }
-  LOG_INF("WIFI", "No saved network joined in the background (%u visible)", static_cast<unsigned>(visible.size()));
+bool SavedWifiConnect::isJoinFailure(const int status) {
+  if (status == WL_CONNECT_FAILED || status == WL_NO_SSID_AVAIL) return true;
+#ifndef SIMULATOR
+  return status == WL_CONNECTION_LOST;
+#else
   return false;
+#endif
+}
+
+void SavedWifiConnect::rememberJoined(const std::string& ssid) {
+  LOG_INF("WIFI", "Joined %s (rssi=%d)", ssid.c_str(), WiFi.RSSI());
+  WIFI_STORE.setLastConnectedSsid(ssid);
 }
 
 void SavedWifiConnect::disconnect() {
