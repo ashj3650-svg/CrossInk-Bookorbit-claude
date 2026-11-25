@@ -1177,6 +1177,9 @@ bool ActivityManager::blocksGlobalInput() const { return currentActivity && curr
 bool ActivityManager::isDeviceLocked() const { return currentActivity && currentActivity->isDeviceLock(); }
 
 bool ActivityManager::isHomeActivity() const { return currentActivity && currentActivity->name == "Home"; }
+bool ActivityManager::isBookOrbitCatalogActivity() const {
+  return currentActivity && currentActivity->name == "BookOrbitCatalogBrowser";
+}
 
 bool ActivityManager::isReaderActivity() const {
   if (currentActivity && currentActivity->isReaderActivity()) {

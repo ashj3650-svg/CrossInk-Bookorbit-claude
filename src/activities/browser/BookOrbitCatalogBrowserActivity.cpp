@@ -2096,34 +2096,8 @@ void BookOrbitCatalogBrowserActivity::queueDownload(const int64_t bookId, const 
 void BookOrbitCatalogBrowserActivity::collectFinishedDownloads(const bool notify) {
   BookOrbitBackgroundDownloads::Finished done;
   while (BookOrbitBackgroundDownloads::takeFinished(done)) {
-    using BookOrbitBookDownload::Result;
-    const char* notice = nullptr;
     bool onCard = false;
-    switch (done.result) {
-      case Result::Downloaded:
-        BookOrbitBookDownload::finishTransfer(done.bookId, done.path);
-        onCard = true;
-        notice = tr(STR_BOOK_DOWNLOADED);
-        break;
-      case Result::AlreadyOnCard:
-        BookOrbitDownloadIndex::record(done.bookId, done.path);
-        onCard = true;
-        break;
-      case Result::NoEpub:
-        notice = tr(STR_NO_EPUB_FORMAT);
-        break;
-      case Result::Unreachable:
-        notice = tr(STR_BOOKORBIT_CATALOG_ERROR);
-        break;
-      case Result::NoSpace:
-        notice = tr(STR_SD_CARD_FULL);
-        break;
-      case Result::Failed:
-        notice = tr(STR_DOWNLOAD_FAILED);
-        break;
-      case Result::Cancelled:
-        break;
-    }
+    const char* notice = BookOrbitBackgroundDownloads::settle(done, onCard);
     if (onCard) {
       localOnDeviceCount = -1;  // recounted by the next root
       RenderLock lock(*this);

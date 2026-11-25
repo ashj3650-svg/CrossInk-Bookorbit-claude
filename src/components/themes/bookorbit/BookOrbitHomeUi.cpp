@@ -15,6 +15,7 @@
 #include "components/UiAppHelpers.h"
 #include "components/icons/bookOrbitHomeIcons.h"
 #include "fontIds.h"
+#include "network/HomeWifi.h"
 
 namespace {
 using BookOrbitHomeLayout::kMargin;
@@ -82,9 +83,10 @@ void BookOrbitHomeUi::render(const HalDisplay::RefreshMode refreshMode) {
   const int stop = showRing ? stops.selectedStopIndex(pageIndexNow) : -1;
 
   const bool samePage = painted && !repaintRequested && paintedPage == pageIndexNow;
+  const bool wifiNow = HomeWifi::linkUp();
   if (samePage && refreshMode == HalDisplay::FAST_REFRESH && framebufferHash() == paintedHash) {
     registerTouchTargets();
-    if (stop == paintedStop) return;
+    if (stop == paintedStop && wifiNow == paintedWifi) return;
     drawRing(paintedStop, false);
     drawRing(stop, true);
     drawTopBar();
@@ -113,6 +115,7 @@ void BookOrbitHomeUi::render(const HalDisplay::RefreshMode refreshMode) {
   paintedPage = pageIndexNow;
   paintedStop = stop;
   paintedHash = framebufferHash();
+  paintedWifi = wifiNow;
 }
 
 void BookOrbitHomeUi::registerTouchTargets() const {

@@ -1,10 +1,15 @@
 #include "HomeWifi.h"
 
+#include <WiFi.h>
+
+bool HomeWifi::linkUp() { return WiFi.getMode() != WIFI_OFF && WiFi.status() == WL_CONNECTED; }
+
 #if CROSSINK_APP_HOME_WIFI
 
 #include <Arduino.h>
+#include <HalClock.h>
 #include <Logging.h>
-#include <WiFi.h>
+#include <WallClock.h>
 
 #include <algorithm>
 #include <string>
@@ -13,6 +18,7 @@
 
 #include "CrossPointSettings.h"
 #include "WifiCredentialStore.h"
+#include "network/BookOrbitBackgroundDownloads.h"
 #include "network/SavedWifiConnect.h"
 
 namespace {
@@ -68,6 +74,17 @@ void radioDown(const char* reason) {
   setState(State::Off);
 }
 
+// Without a clock chip the time is only known once NTP has set it, and reading progress
+// is dated with it (ProgressSaveTime). Asked once a connection is up while the clock is
+// still unset; that wait (a few seconds at most) happens on Home, not in a book.
+void syncClockIfUnset() {
+#ifndef SIMULATOR
+  uint32_t before = 0;
+  if (halClock.isAvailable() || WallClock::now(before)) return;
+  if (halClock.syncSystemTimeFromNTP()) WallClock::markNtpSynced(before);
+#endif
+}
+
 void scheduleAttempt(const unsigned long delayMs) {
   nextAttemptAt = millis() + delayMs;
   attemptScheduled = true;
@@ -116,6 +133,7 @@ void startAttempt() {
     LOG_DBG("HWIFI", "No saved network to join");
     return;
   }
+  LOG_INF("HWIFI", "Joining a saved network from Home (free=%u maxAlloc=%u)", ESP.getFreeHeap(), ESP.getMaxAllocHeap());
   if (!SavedWifiConnect::startStation()) {
     scheduleRetry();
     return;
@@ -128,12 +146,19 @@ void startAttempt() {
 }
 
 void collectScanResults(const int found) {
-  // Keep the last network if it was tried already: a scan result for it is skipped below.
+  // Networks tried already are not queued again, except the last one joined: a first join
+  // that fails on its own (a router slow to answer the handshake) gets one more try when
+  // the scan sees it, after any other saved network in range.
   std::vector<std::pair<int32_t, std::string>> visible;
   visible.reserve(MAX_SCANNED_CANDIDATES + 1);
+  bool lastNetworkSeen = false;
   for (int i = 0; i < found; i++) {
     std::string ssid = WiFi.SSID(i).c_str();
-    if (ssid.empty() || std::find(candidates.begin(), candidates.end(), ssid) != candidates.end()) continue;
+    if (ssid.empty()) continue;
+    if (std::find(candidates.begin(), candidates.end(), ssid) != candidates.end()) {
+      if (!candidates.empty() && ssid == candidates.front()) lastNetworkSeen = true;
+      continue;
+    }
     const int32_t rssi = WiFi.RSSI(i);
     const auto seen = std::find_if(visible.begin(), visible.end(),
                                    [&ssid](const std::pair<int32_t, std::string>& n) { return n.second == ssid; });
@@ -151,12 +176,18 @@ void collectScanResults(const int found) {
     if (visible.size() > MAX_SCANNED_CANDIDATES) visible.pop_back();
   }
   WiFi.scanDelete();
+  const std::string lastNetwork = lastNetworkSeen ? candidates.front() : std::string();
   for (auto& network : visible) candidates.push_back(std::move(network.second));
+  if (lastNetworkSeen) candidates.push_back(lastNetwork);
+  LOG_INF("HWIFI", "Scan found %d networks; %u saved ones to try", found,
+          static_cast<unsigned>(candidates.size() - nextCandidate));
 }
 
 // Arriving on Home: adopt a connection left up by the activity Home handed over to, or
 // schedule a join.
 void onArrivedHome() {
+  // A book opened while a download from Home ran, and Home is back before it ended.
+  stopForBook = false;
   if (state == State::Released) {
     if (WiFi.status() == WL_CONNECTED) {
       LOG_INF("HWIFI", "Keeping the connection that is already up");
@@ -197,6 +228,7 @@ void tickOnHome(const unsigned long idleMs) {
         releaseCandidates();
         failures = 0;
         setState(State::Connected);
+        syncClockIfUnset();
         break;
       }
       if (SavedWifiConnect::isJoinFailure(status) || now - stateSince >= JOIN_TIMEOUT_MS) {
@@ -229,7 +261,7 @@ void tickOnHome(const unsigned long idleMs) {
       if (WiFi.status() != WL_CONNECTED) {
         radioDown("connection lost");
         scheduleRetry();
-      } else if (idleMs >= IDLE_OFF_MS) {
+      } else if (idleMs >= IDLE_OFF_MS && !BookOrbitBackgroundDownloads::busy()) {
         radioDown("10 minutes on Home without a button press");
         idleOff = true;
       }
@@ -242,7 +274,8 @@ void tickOnHome(const unsigned long idleMs) {
 }  // namespace
 
 void HomeWifi::tick(const bool onHome, const unsigned long idleMs) {
-  if (stopForBook) {
+  // A book from Home still downloading keeps the radio until it is in.
+  if (stopForBook && !BookOrbitBackgroundDownloads::busy()) {
     stopForBook = false;
     if (state == State::Connected || (state == State::Released && WiFi.getMode() != WIFI_OFF)) {
       radioDown("a book opened");

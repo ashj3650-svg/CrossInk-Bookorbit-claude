@@ -252,5 +252,15 @@ TEST(BookOrbitSmartSyncNewestSave, WithoutBothDatesTheMarkerRulesApply) {
   const Marker marker = makeMarker(kLastSync, {5, 12, 30});
   EXPECT_EQ(decideNewestSave({9, 2, 30}, {7, 4, 30}, kLater, marker, 0),
             decide({9, 2, 30}, {7, 4, 30}, kLater, marker));
-  EXPECT_EQ(decideNewestSave({9, 2, 30}, {7, 4, 30}, 0, Marker{}, kLater), Decision::AskNoHistory);
+}
+
+TEST(BookOrbitSmartSyncNewestSave, ABookNeverSyncedTakesTheFurtherPosition) {
+  // First opened on this device, before the clock could date the save: further wins.
+  EXPECT_EQ(decideNewestSave({9, 2, 30}, {7, 4, 30}, kLater, Marker{}, 0), Decision::UploadLocal);
+  EXPECT_EQ(decideNewestSave({0, 3, 30}, {7, 4, 30}, kLater, Marker{}, 0), Decision::ApplyRemote);
+  // A server without dates.
+  EXPECT_EQ(decideNewestSave({9, 2, 30}, {7, 4, 30}, 0, Marker{}, kLater), Decision::UploadLocal);
+  // A marker that sees both sides move still asks.
+  const Marker marker = makeMarker(kLastSync, {5, 12, 30});
+  EXPECT_EQ(decideNewestSave({9, 2, 30}, {7, 4, 30}, kLater, marker, 0), Decision::AskConflict);
 }

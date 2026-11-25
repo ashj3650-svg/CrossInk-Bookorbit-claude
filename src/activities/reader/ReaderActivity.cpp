@@ -18,6 +18,7 @@
 #include "activities/util/BmpViewerActivity.h"
 #include "activities/util/FullScreenMessageActivity.h"
 #include "components/UITheme.h"
+#include "network/BookOrbitBackgroundDownloads.h"
 #include "network/HomeWifi.h"
 #include "util/BookOrbitNewBooks.h"
 #include "util/BookUpdateMigration.h"
@@ -231,7 +232,8 @@ void ReaderActivity::onEnter() {
 #if CROSSINK_APP_HOME_WIFI
     // Sync on open: with Wi-Fi up from Home, the book opens where it was last read on any
     // device, when that is the newer save. Wi-Fi goes off right after (HomeWifi).
-    if (HomeWifi::isConnected() && BOOKORBIT_STORE.hasCredentials()) {
+    // Not while a book from Home is still downloading: the two would share one TLS stack.
+    if (HomeWifi::isConnected() && BOOKORBIT_STORE.hasCredentials() && !BookOrbitBackgroundDownloads::busy()) {
       GUI.drawPopup(renderer, tr(STR_FETCH_PROGRESS));
       BookOrbitRecentSync::pullBeforeOpen(renderer, initialBookPath);
     }

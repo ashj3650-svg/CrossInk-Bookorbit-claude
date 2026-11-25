@@ -45,6 +45,8 @@ class BookOrbitHomeUi final {
   // Moves through the current page's tiles, wrapping at either end.
   void moveSelection(const int delta) { stops.moveSelection(delta); }
   void movePage(const int delta) { stops.movePage(delta); }
+  // The next render paints the whole page again (a popup drawn over it has gone).
+  void requestRepaint() { repaintRequested = true; }
   // Null when the page has no stop to activate.
   const Stop* selectedStop() const { return stops.selectedStop(); }
   const Stop* stopAt(const int index) const { return stops.stopAt(index); }
@@ -79,5 +81,7 @@ class BookOrbitHomeUi final {
   int paintedPage = -1;
   int paintedStop = -1;
   uint32_t paintedHash = 0;
+  // Whether the top bar was last drawn with the Wi-Fi icon.
+  bool paintedWifi = false;
   int pageTurnsSinceHalfRefresh = 0;
 };

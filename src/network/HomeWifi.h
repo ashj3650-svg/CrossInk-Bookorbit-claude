@@ -28,4 +28,8 @@ void stop(const char* reason);
 // True while a connection made at Home is up.
 bool isConnected();
 
+// True while the radio is joined to a network, whoever brought it up (every board). The
+// status bar outside the reader shows a Wi-Fi icon then.
+bool linkUp();
+
 }  // namespace HomeWifi
