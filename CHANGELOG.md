@@ -5,6 +5,14 @@ records only its own additions. Each release states the CrossInk version it is b
 on; for everything inherited from upstream, see the
 [CrossInk changelog](https://github.com/uxjulia/CrossInk/blob/main/CHANGELOG.md).
 
+## [Unreleased]
+
+Based on CrossInk v1.6.1.
+
+### Fixed
+
+- A damaged settings or library file on the SD card (recent books, reader state, Wi-Fi networks, bookmarks, a book's cached details) can no longer crash the reader while it starts or opens a book. A file whose stored text length is impossible is now read as damaged and skipped, where the reader used to try to reserve up to 4 GB for it and restart.
+
 ## [v1.6.1+bookorbit.9] - 2026-11-22
 
 Based on CrossInk v1.6.1.

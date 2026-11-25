@@ -853,7 +853,7 @@ int16_t EpubReaderDrawerActivity::drawerHeight() const {
 fui::Rect EpubReaderDrawerActivity::previewBounds() const {
   if (CROSSINK_APP_READER_SAMPLE_PREVIEW) return samplePreviewBounds;
   const int16_t height = static_cast<int16_t>(renderer.getScreenHeight() - drawerHeight());
-  return fui::Rect{0, 0, renderer.getScreenWidth(), height};
+  return fui::Rect{0, 0, static_cast<int16_t>(renderer.getScreenWidth()), height};
 }
 
 bool EpubReaderDrawerActivity::showsSamplePreview() const {

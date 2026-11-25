@@ -701,10 +701,11 @@ void notifyQuickLockChanged() {
     quickLockBadgeBackdrop.save(renderer, x, y);
     renderer.fillRect(x, y, QuickLockBadgeBackdrop::SIZE, QuickLockBadgeBackdrop::SIZE, background);
     freeink::ui::GfxRendererTarget target(renderer);
-    target.bitmap(freeink::ui::Rect{x + (QuickLockBadgeBackdrop::SIZE - icon_tabler_lock_28.w) / 2,
-                                    y + (QuickLockBadgeBackdrop::SIZE - icon_tabler_lock_28.h) / 2,
-                                    icon_tabler_lock_28.w, icon_tabler_lock_28.h},
-                  freeink::ui::bitmapFromIcon(icon_tabler_lock_28), freeink::ui::BitmapMode::Center,
+    const freeink::ui::Rect iconRect{
+        static_cast<int16_t>(x + (QuickLockBadgeBackdrop::SIZE - icon_tabler_lock_28.w) / 2),
+        static_cast<int16_t>(y + (QuickLockBadgeBackdrop::SIZE - icon_tabler_lock_28.h) / 2),
+        static_cast<int16_t>(icon_tabler_lock_28.w), static_cast<int16_t>(icon_tabler_lock_28.h)};
+    target.bitmap(iconRect, freeink::ui::bitmapFromIcon(icon_tabler_lock_28), freeink::ui::BitmapMode::Center,
                   freeink::ui::Paint::solid(foreground ? freeink::ui::Color::Black : freeink::ui::Color::White));
     renderer.displayBuffer(HalDisplay::FAST_REFRESH);
   } else {

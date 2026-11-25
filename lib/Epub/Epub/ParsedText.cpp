@@ -1258,7 +1258,7 @@ bool ParsedText::computeLineBreaks(Arena& scratchArena, const GfxRenderer& rende
       const int extraStartOffset =
           j == static_cast<size_t>(i) ? calculateRubyExtraStartOffset(i, totalWordCount, renderer, fontId) : 0;
 
-      currlen += wordWidths[j] + gap + (j == i ? extraStartOffset : 0);
+      currlen += wordWidths[j] + gap + extraStartOffset;
 
       if (currlen > effectivePageWidth) {
         break;
