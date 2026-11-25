@@ -1,6 +1,7 @@
 #include "BookOrbitHomeTiles.h"
 
 #include <Bitmap.h>
+#include <BoardConfig.h>
 #include <Epub.h>
 #include <FsHelpers.h>
 #include <GfxRenderer.h>
@@ -51,7 +52,8 @@ struct CachedCover {
   size_t bytes = 0;
   HeapByteBuffer data;
 };
-constexpr size_t kCachedCovers = 16;
+// One idle slot on the ESP32-C3 boards, which have no PSRAM to fill it.
+constexpr size_t kCachedCovers = FREEINK_MCU_C3 ? 1 : 16;
 CachedCover gCoverCache[kCachedCovers];
 uint32_t gCoverUseClock = 0;
 
@@ -246,7 +248,7 @@ void BookOrbitHomeTiles::drawCoverFile(const char* path, const Rect& slot, const
 
 void BookOrbitHomeTiles::rememberCover(const char* path, const Rect& slot, const Rect& fitted,
                                        const uint8_t orientation, const bool onBlack, const bool inverted) const {
-  if (!psramHeapAvailable()) return;
+  if (FREEINK_MCU_C3 || !psramHeapAvailable()) return;
   // The least recently drawn entry makes room; the Home and Library pages show 9 at most.
   CachedCover* target = &gCoverCache[0];
   for (CachedCover& cover : gCoverCache) {

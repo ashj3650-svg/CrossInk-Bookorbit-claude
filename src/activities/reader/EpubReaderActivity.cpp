@@ -2,6 +2,7 @@
 
 #include <Arduino.h>
 #include <BidiUtils.h>
+#include <BoardConfig.h>
 #include <Epub/Page.h>
 #include <Epub/PageCountEstimator.h>
 #include <Epub/blocks/TextBlock.h>
@@ -95,6 +96,10 @@
 #include "util/ScreenshotUtil.h"
 
 namespace {
+// Index ahead and Next page ready keep their work in PSRAM. The ESP32-C3 boards have none,
+// so the compile-time half lets the compiler drop that code from their tight image.
+inline bool readerPsramExtras() { return !FREEINK_MCU_C3 && psramHeapAvailable(); }
+
 constexpr unsigned long TOUCH_DICTIONARY_LOOKUP_HOLD_MS = 1000;
 // pagesPerRefresh now comes from SETTINGS.getRefreshFrequency()
 constexpr unsigned long longPressMenuMs = 600;
@@ -3017,7 +3022,7 @@ void EpubReaderActivity::idlePrewarmNextPage() {
   const int renderFontId = activeSectionFontId != 0 ? activeSectionFontId : SETTINGS.getReaderFontId();
   // PSRAM boards also prepare the next page for built-in and scalable fonts, and keep it
   // for the forward turn (see takePreloadedPage). The others only warm SD-card fonts.
-  const bool keepPage = psramHeapAvailable() && !section->isPartial();
+  const bool keepPage = readerPsramExtras() && !section->isPartial();
   if ((!keepPage && !renderer.isSdCardFont(renderFontId)) ||
       (idlePrewarmSpine == currentSpineIndex && idlePrewarmPage == section->currentPage &&
        idlePrewarmFontId == renderFontId)) {
@@ -3088,7 +3093,7 @@ void EpubReaderActivity::stopIndexAhead() {
 }
 
 void EpubReaderActivity::tickIndexAhead() {
-  if (!psramHeapAvailable() || !epub || !section || activeFootnotePreview || automaticPageTurnActive ||
+  if (!readerPsramExtras() || !epub || !section || activeFootnotePreview || automaticPageTurnActive ||
       section->isBuilding() || section->isPartial() || buildViewportWidth == 0 || lastRenderCompleteMs == 0 ||
       (millis() - lastRenderCompleteMs) < INDEX_AHEAD_IDLE_MS ||
       backgroundBuildYieldForInput.load(std::memory_order_relaxed)) {
