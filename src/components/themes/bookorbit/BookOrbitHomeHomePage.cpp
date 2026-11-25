@@ -317,6 +317,8 @@ void addStops(const BookOrbitHomePageContext& context, BookOrbitHomeStops& stops
       stops.add(bookRowRect(also, i), 6, 0, Action::OpenCatalogBook, row.remoteArg);
     }
   }
+  // Last, so Up from the current book reaches it.
+  stops.add(BookOrbitHomeLayout::searchButtonRect(context.renderer, context.pageCount), 8, 0, Action::OpenSearch);
 }
 
 void draw(const BookOrbitHomePageContext& context) {
@@ -329,7 +331,7 @@ void draw(const BookOrbitHomePageContext& context) {
   } else {
     snprintf(title, sizeof(title), "%s", heading);
   }
-  context.tiles.drawTitleRow(title, context.pageCount, context.currentPage);
+  context.tiles.drawTitleRow(title, context.pageCount, context.currentPage, true);
 
   drawCurrentBook(context, currentBookTile(grid));
   if (model.showStats) {

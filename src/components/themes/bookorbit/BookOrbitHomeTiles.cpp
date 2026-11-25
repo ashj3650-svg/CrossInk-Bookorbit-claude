@@ -41,9 +41,16 @@ std::string BookOrbitHomeTiles::coverPath(const RecentBook& book, const int widt
   return UITheme::getCoverThumbPath(book.coverBmpPath, width, height);
 }
 
-void BookOrbitHomeTiles::drawTitleRow(const char* title, const int pageCount, const int currentPage) const {
+void BookOrbitHomeTiles::drawTitleRow(const char* title, const int pageCount, const int currentPage,
+                                      const bool withSearch) const {
   const int y = kTitleRowTop + UITheme::getTopStatusBarInset(renderer);
-  const int titleWidth = renderer.getScreenWidth() - 2 * kMargin - (pageCount * 15 + 8);
+  int titleWidth = renderer.getScreenWidth() - 2 * kMargin - (pageCount * 15 + 8);
+  if (withSearch) {
+    const Rect button = BookOrbitHomeLayout::searchButtonRect(renderer, pageCount);
+    titleWidth = button.x - kMargin - kPad / 2;
+    drawLucideIcon(renderer, icon_search_24, button.x + (button.width - kIconSize) / 2,
+                   button.y + (button.height - kIconSize) / 2);
+  }
   drawFitted(UI_12_FONT_ID, kMargin, y, title, titleWidth, true);
   constexpr int dotRadius = 4;
   int centerX = renderer.getScreenWidth() - kMargin - dotRadius;

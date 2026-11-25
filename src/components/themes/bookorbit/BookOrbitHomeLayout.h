@@ -63,6 +63,9 @@ Rect bookRowRect(const Rect& tile, int rowIndex);
 // One cover of a shelf tile, with its caption under it.
 Rect shelfCoverRect(const GfxRenderer& renderer, const Rect& tile, int index);
 
+// The Home page's Search button, in the title row left of the page dots.
+Rect searchButtonRect(const GfxRenderer& renderer, int pageCount);
+
 // The exact slot a book's cover is drawn in: 0 is the current book, then the rows.
 Rect coverSlot(const Grid& grid, bool showStats, int bookIndex);
 

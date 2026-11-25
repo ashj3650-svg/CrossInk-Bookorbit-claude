@@ -20,7 +20,8 @@ class BookOrbitHomeTiles {
   static std::string coverPath(const RecentBook& book, int width, int height);
 
   // The page's title, then a dot per page with the current one filled.
-  void drawTitleRow(const char* title, int pageCount, int currentPage) const;
+  // withSearch draws the Home page's Search button between the title and the dots.
+  void drawTitleRow(const char* title, int pageCount, int currentPage, bool withSearch = false) const;
 
   void drawFitted(int fontId, int x, int y, const char* text, int maxWidth, bool bold = false, bool black = true) const;
   void drawRightAligned(int fontId, int right, int y, const char* text, bool bold = false) const;

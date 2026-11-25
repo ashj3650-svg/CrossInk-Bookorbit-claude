@@ -26,6 +26,14 @@ Grid grid(const GfxRenderer& renderer) {
   return out;
 }
 
+Rect searchButtonRect(const GfxRenderer& renderer, const int pageCount) {
+  // A 24 px icon with 6 px around it, centred on the page dots' line (see drawTitleRow).
+  constexpr int size = kIconSize + 12;
+  const int dotsWidth = pageCount * 15 + 8;
+  const int y = kTitleRowTop + UITheme::getTopStatusBarInset(renderer);
+  return Rect{renderer.getScreenWidth() - kMargin - dotsWidth - size, y - 1, size, size};
+}
+
 int spanHeight(const Grid& grid, const int rows) { return rows * grid.rowHeight + (rows - 1) * kGap; }
 
 int alsoReadingRows(const bool showStats) { return showStats ? 2 : 3; }

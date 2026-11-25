@@ -1260,6 +1260,9 @@ void HomeActivity::activateBookOrbitStop(const BookOrbitHomeUi::Stop& stop) {
     case BookOrbitHomeUi::Action::Refresh:
       silentRestartToNetwork(NetworkBootTarget::BOOKORBIT_HOME_REFRESH);
       break;
+    case BookOrbitHomeUi::Action::OpenSearch:
+      activityManager.goToLibrary(true);
+      break;
     case BookOrbitHomeUi::Action::None:
       break;
   }

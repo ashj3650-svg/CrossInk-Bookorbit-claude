@@ -16,7 +16,9 @@
 
 class LibraryActivity final : public Activity {
  public:
-  LibraryActivity(GfxRenderer& renderer, MappedInputManager& mappedInput);
+  // startWithSearch opens the search keyboard straight away (Home's Search button);
+  // cancelling it then goes back where the user came from.
+  LibraryActivity(GfxRenderer& renderer, MappedInputManager& mappedInput, bool startWithSearch = false);
   void onEnter() override;
   void onExit() override;
   void loop() override;
@@ -87,6 +89,11 @@ class LibraryActivity final : public Activity {
   bool pendingCacheDeletedFeedback = false;
   unsigned long cacheDeletedFeedbackShowTime = 0;
   std::string query;
+  // Recently Opened lists only the recent-books history, so a search started there runs
+  // over the whole Library in title order and the sort comes back when it is cleared.
+  bool searchSwitchedSort = false;
+  bool searchSwitchedDescending = true;
+  bool startWithSearch = false;
   // Searches and filters keep one bit per indexed book plus a running count per
   // 256-book block: about 4 KiB at the format ceiling, where a u16 per match
   // would need 64 KiB of contiguous C3 heap. Bits are positions in filterOrder.
@@ -147,9 +154,9 @@ class LibraryActivity final : public Activity {
   void reloadAfterBookAction();
   void openBook(int row);
   void openSortPicker(int selectedIndex = -1);
-  void openMenu();
   void refreshLibrary();
   void openSearch();
+  void setQuery(std::string text);
   void openSettings();
   void activateControl(int control);
   // Owns the allocation-failure check and render lock for every child result.
