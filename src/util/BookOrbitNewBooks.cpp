@@ -30,7 +30,10 @@ bool save(const BookOrbitNewBooks::Book (&books)[BookOrbitNewBooks::MAX_BOOKS], 
     return true;
   }
   HalFile file;
-  if (!Storage.openFileForWrite("BONB", PATH, file)) return false;
+  if (!Storage.openFileForWrite("BONB", PATH, file)) {
+    LOG_ERR("BONB", "Cannot open the new-books list for writing");
+    return false;
+  }
   Header header;
   header.count = count;
   const size_t bytes = sizeof(BookOrbitNewBooks::Book) * count;

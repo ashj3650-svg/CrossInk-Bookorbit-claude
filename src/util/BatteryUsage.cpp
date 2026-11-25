@@ -44,7 +44,10 @@ bool load(BatteryUsageMath::State& out) {
 
 bool save(const BatteryUsageMath::State& state) {
   HalFile file;
-  if (!Storage.openFileForWrite("BATU", PATH, file)) return false;
+  if (!Storage.openFileForWrite("BATU", PATH, file)) {
+    LOG_ERR("BATU", "Cannot open the battery-use totals for writing");
+    return false;
+  }
   const Header header;
   const bool ok = file.write(reinterpret_cast<const uint8_t*>(&header), sizeof(header)) == sizeof(header) &&
                   file.write(reinterpret_cast<const uint8_t*>(&state), sizeof(state)) == sizeof(state);
