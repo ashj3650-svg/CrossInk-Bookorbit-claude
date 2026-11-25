@@ -27,6 +27,7 @@ The main data directory is `.crosspoint` on the SD card. It stores render caches
 ├── library.metd            # Library EPUB metadata cache: parsed metadata records
 ├── recent.bin.bak          # Legacy binary recent-books file after migration, if present
 ├── wifi.json               # Saved Wi-Fi networks
+├── wifi_fast.bin           # The router and channel your last network answered on, for a direct join
 ├── opds.json               # Saved OPDS servers
 ├── koreader.json           # KOReader sync credentials
 ├── bookmarks/              # Bookmark files, one per book, named by content hash

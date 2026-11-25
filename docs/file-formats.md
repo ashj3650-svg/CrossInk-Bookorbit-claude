@@ -1758,3 +1758,20 @@ the card to the host. Manage Fonts performs a full rescan; alternatively remove
 this cache to force reinspection after external same-length font changes.
 
 EPUB layout cache versions and identities are unchanged by this catalog.
+
+## `/.crosspoint/wifi_fast.bin`
+
+### Version 1
+
+Where the Wi-Fi network joined last answered (`src/network/SavedWifiConnect.cpp`): the next
+background join (sleep sync, Wi-Fi at Home) goes to that router on that channel directly,
+skipping the scan of every channel. Written only when a join lands somewhere new, removed
+when a direct join fails (the next join then scans). A file with another magic, a channel
+outside 1-14 or a short read is ignored. Packed, little-endian, 44 bytes.
+
+| Offset | Size | Field |
+| --- | --- | --- |
+| 0 | 4 | Magic, `0x31484657` ("WFH1") |
+| 4 | 33 | SSID, NUL-terminated |
+| 37 | 1 | Channel, 1-14 |
+| 38 | 6 | BSSID (the router's MAC address) |
