@@ -515,6 +515,11 @@ class CrossPointSettings : public PersistableStore<CrossPointSettings> {
   // Wi-Fi at Home (HomeWifi): join a saved network in the background while Home shows.
   // Boards without PSRAM never offer it.
   uint8_t wifiAtHome = 1;
+  // Performance Mode: keep the CPU at full speed and check the buttons every 10 ms while
+  // the reader is on, instead of slowing to the idle speed (and a 50 ms button check)
+  // after 3 seconds without a press. Page turns start sooner; the battery drains faster
+  // while the reader is awake (sleep is unaffected).
+  uint8_t performanceMode = 1;
   // Let Check for Updates offer this fork's release candidates (GitHub pre-releases) as well
   // as its final releases. Off by default: candidates are test builds.
   uint8_t otaIncludePrereleases = 0;

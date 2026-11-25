@@ -606,7 +606,7 @@ inline constexpr size_t BASE_SETTINGS_KOREADER_ENTRIES = 5;
 #else
 inline constexpr size_t BASE_SETTINGS_KOREADER_ENTRIES = 0;
 #endif
-inline constexpr size_t BASE_SETTINGS_CAPACITY = 102 + 3 + (CROSSINK_APP_HOME_WIFI ? 1 : 0) +
+inline constexpr size_t BASE_SETTINGS_CAPACITY = 102 + 4 + (CROSSINK_APP_HOME_WIFI ? 1 : 0) +
                                                  (CROSSINK_APP_SLEEP_AUTO_DOWNLOAD ? 1 : 0) +
                                                  (CROSSINK_APP_CAP_TOUCH ? 9 : 0) + BASE_SETTINGS_KOREADER_ENTRIES;
 
@@ -1063,12 +1063,13 @@ inline std::vector<SettingInfo> buildDisplaySleepSettingsList(const std::vector<
 
 inline std::vector<SettingInfo> buildSystemSettingsParentList(const std::vector<SettingInfo>& allSettings) {
   std::vector<SettingInfo> systemSettings;
-  systemSettings.reserve(11);
+  systemSettings.reserve(12);
   systemSettings.push_back(SettingInfo::Submenu(StrId::STR_SYSTEM_DEVICE, SettingAction::SystemDevice));
   systemSettings.push_back(SettingInfo::Submenu(StrId::STR_SYSTEM_FILES_CACHE, SettingAction::SystemFilesCache));
   systemSettings.push_back(SettingInfo::Submenu(StrId::STR_READING_STATS, SettingAction::SystemReadingStats));
   systemSettings.push_back(SettingInfo::Action(StrId::STR_WIFI_NETWORKS, SettingAction::Network));
   addSettingByName(systemSettings, allSettings, StrId::STR_WIFI_AT_HOME);
+  addSettingByName(systemSettings, allSettings, StrId::STR_PERFORMANCE_MODE);
 #if CROSSINK_APP_CAP_KOREADER_SYNC
   systemSettings.push_back(SettingInfo::Action(StrId::STR_KOREADER_SYNC, SettingAction::KOReaderSync));
 #endif
