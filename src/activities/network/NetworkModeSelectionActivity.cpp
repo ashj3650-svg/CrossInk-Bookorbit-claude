@@ -11,6 +11,7 @@
 #include "components/icons/listIcons.h"
 #include "components/icons/readingStatsIcons.h"
 #include "fontIds.h"
+#include "network/HomeWifi.h"
 
 namespace fui = freeink::ui;
 
@@ -43,18 +44,23 @@ constexpr UIIcon menuIcons[] = {UIIcon::Wifi, UIIcon::Library, UIIcon::Hotspot, 
 #endif
 
 constexpr int ALL_MENU_ITEM_COUNT = sizeof(menuModes) / sizeof(menuModes[0]);
-int menuItemCount() { return ALL_MENU_ITEM_COUNT - (SETTINGS.shouldTrackReadingStats() ? 0 : 1); }
+// With Wi-Fi at Home on, Home serves the web page (and Calibre's connection) by itself
+// whenever it is connected (HomeWebServer): Join a Network and Calibre Wireless, the first
+// two entries, are left out.
+int skippedItems() { return CROSSINK_APP_HOME_WIFI && SETTINGS.wifiAtHome ? 2 : 0; }
+int menuItemCount() { return ALL_MENU_ITEM_COUNT - skippedItems() - (SETTINGS.shouldTrackReadingStats() ? 0 : 1); }
 int listItemCount() { return menuItemCount() + 1; }
-constexpr int NEARBY_SECTION_INDEX = CROSSINK_APP_CAP_USB_DRIVE ? 4 : 3;
+// The Nearby Device header's place among the entries shown.
+int nearbySectionIndex() { return (CROSSINK_APP_CAP_USB_DRIVE ? 4 : 3) - skippedItems(); }
 
-int listIndexForMenuIndex(const int menuIndex) { return menuIndex < NEARBY_SECTION_INDEX ? menuIndex : menuIndex + 1; }
+int listIndexForMenuIndex(const int menuIndex) { return menuIndex < nearbySectionIndex() ? menuIndex : menuIndex + 1; }
 }  // namespace
 
 NetworkModeSelectionActivity::NetworkModeSelectionActivity(GfxRenderer& renderer, MappedInputManager& mappedInput)
     : Activity("NetworkModeSelection", renderer, mappedInput), ui(renderer) {}
 
 void NetworkModeSelectionActivity::selectCurrent() {
-  if (selectedIndex >= 0 && selectedIndex < menuItemCount()) onModeSelected(menuModes[selectedIndex]);
+  if (selectedIndex >= 0 && selectedIndex < menuItemCount()) onModeSelected(menuModes[selectedIndex + skippedItems()]);
 }
 
 void NetworkModeSelectionActivity::onRowEvent(const fui::ActionEvent& event, void* user) {
@@ -179,25 +185,27 @@ void NetworkModeSelectionActivity::buildListScreen(UiApp::ScreenType& screen) {
 
   std::vector<fui::ListItem> items;
   items.reserve(listItemCount());
+  const int skipped = skippedItems();
   for (int i = 0; i < menuItemCount(); i++) {
-    if (i == NEARBY_SECTION_INDEX) {
+    if (i == nearbySectionIndex()) {
       fui::ListItem header;
       header.label = I18N.get(StrId::STR_NEARBY_DEVICE);
       header.isHeader = true;
       items.push_back(header);
     }
 
+    const int entry = i + skipped;
     fui::ListItem item;
-    item.label = I18N.get(menuItems[i]);
-    item.subtitle = I18N.get(menuDescs[i]);
-    if (menuModes[i] == NetworkMode::USB_DRIVE) {
+    item.label = I18N.get(menuItems[entry]);
+    item.subtitle = I18N.get(menuDescs[entry]);
+    if (menuModes[entry] == NetworkMode::USB_DRIVE) {
       item.icon = fui::bitmapFromIcon(icon_usb_32);
-    } else if (menuModes[i] == NetworkMode::NEARBY_BOOK_RECEIVE) {
+    } else if (menuModes[entry] == NetworkMode::NEARBY_BOOK_RECEIVE) {
       item.icon = fui::bitmapFromIcon(icon_chevrons_left_right_ellipsis_32);
-    } else if (menuModes[i] == NetworkMode::NEARBY_STATS_SYNC) {
+    } else if (menuModes[entry] == NetworkMode::NEARBY_STATS_SYNC) {
       item.icon = fui::bitmapFromIcon(icon_reading_stats_32);
     } else {
-      item.icon = listIconFor(menuIcons[i], 32);  // subtitle rows carry the larger icon
+      item.icon = listIconFor(menuIcons[entry], 32);  // subtitle rows carry the larger icon
     }
     item.actionValue = static_cast<int16_t>(i);
     items.push_back(item);

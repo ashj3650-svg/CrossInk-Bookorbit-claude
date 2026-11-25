@@ -119,6 +119,7 @@ inline esp_sleep_wakeup_cause_t esp_sleep_get_wakeup_cause() { return ESP_SLEEP_
 #include "components/icons/tablerFilledIcons.h"
 #include "fontIds.h"
 #include "network/BookOrbitBackgroundDownloads.h"
+#include "network/HomeWebServer.h"
 #include "network/HomeWifi.h"
 #include "network/UsbSerialFileTransfer.h"
 #ifdef SIMULATOR
@@ -2150,8 +2151,10 @@ void loop() {
 
   // Check for any user activity (button press or release) or active background work
   static unsigned long lastActivityTime = millis();
-  // A book downloading in the background (from a Home shelf) keeps the device awake too.
-  if (userInputReceived || activityManager.preventAutoSleep() || BookOrbitBackgroundDownloads::busy()) {
+  // A book downloading in the background (from a Home shelf), or a file arriving through
+  // Home's web page, keeps the device awake too.
+  if (userInputReceived || activityManager.preventAutoSleep() || BookOrbitBackgroundDownloads::busy() ||
+      HomeWebServer::uploading()) {
     lastActivityTime = millis();         // Reset inactivity timer
     powerManager.setPowerSaving(false);  // Restore normal CPU frequency on user activity
   }

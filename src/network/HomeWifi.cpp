@@ -19,6 +19,7 @@ bool HomeWifi::linkUp() { return WiFi.getMode() != WIFI_OFF && WiFi.status() == 
 #include "CrossPointSettings.h"
 #include "WifiCredentialStore.h"
 #include "network/BookOrbitBackgroundDownloads.h"
+#include "network/HomeWebServer.h"
 #include "network/SavedWifiConnect.h"
 
 namespace {
@@ -68,6 +69,7 @@ void releaseCandidates() {
 
 void radioDown(const char* reason) {
   LOG_INF("HWIFI", "Wi-Fi off: %s", reason);
+  HomeWebServer::stop();
   if (state == State::Scanning) WiFi.scanDelete();
   SavedWifiConnect::disconnect();
   releaseCandidates();
@@ -188,10 +190,12 @@ void collectScanResults(const int found) {
 void onArrivedHome() {
   // A book opened while a download from Home ran, and Home is back before it ended.
   stopForBook = false;
+  if (state == State::Connected) HomeWebServer::start();
   if (state == State::Released) {
     if (WiFi.status() == WL_CONNECTED) {
       LOG_INF("HWIFI", "Keeping the connection that is already up");
       setState(State::Connected);
+      HomeWebServer::start();
       return;
     }
     setState(State::Off);
@@ -229,6 +233,7 @@ void tickOnHome(const unsigned long idleMs) {
         failures = 0;
         setState(State::Connected);
         syncClockIfUnset();
+        HomeWebServer::start();
         break;
       }
       if (SavedWifiConnect::isJoinFailure(status) || now - stateSince >= JOIN_TIMEOUT_MS) {
@@ -261,9 +266,11 @@ void tickOnHome(const unsigned long idleMs) {
       if (WiFi.status() != WL_CONNECTED) {
         radioDown("connection lost");
         scheduleRetry();
-      } else if (idleMs >= IDLE_OFF_MS && !BookOrbitBackgroundDownloads::busy()) {
+      } else if (idleMs >= IDLE_OFF_MS && !BookOrbitBackgroundDownloads::busy() && !HomeWebServer::uploading()) {
         radioDown("10 minutes on Home without a button press");
         idleOff = true;
+      } else {
+        HomeWebServer::handle();
       }
       break;
 
@@ -304,6 +311,8 @@ void HomeWifi::tick(const bool onHome, const unsigned long idleMs) {
 
 void HomeWifi::onActivityEntering(const bool isHome, const bool isReader) {
   if (isHome) return;
+  // The web page is Home's: the next screen may need the radio (or port 80) its own way.
+  HomeWebServer::stop();
   switch (state) {
     case State::Joining:
     case State::Scanning:
