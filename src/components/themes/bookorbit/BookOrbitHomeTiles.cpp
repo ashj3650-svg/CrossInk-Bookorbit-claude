@@ -5,11 +5,14 @@
 #include <FsHelpers.h>
 #include <GfxRenderer.h>
 #include <HalStorage.h>
+#include <Logging.h>
+#include <Memory.h>
 
 #include <algorithm>
 
 #include "BookOrbitHomeLayout.h"
 #include "BookOrbitHomeText.h"
+#include "CrossPointSettings.h"
 #include "RecentBooksStore.h"
 #include "components/UITheme.h"
 #include "components/UiAppHelpers.h"
@@ -31,7 +34,38 @@ constexpr int kBigFontId = LEXENDDECA_16_FONT_ID;
 #endif
 constexpr int kBigValueTop = 28;
 constexpr int kBigValueBaseline = 34;  // from kBigValueTop
+
+// Covers drawn since the device woke, kept as snapshots of the framebuffer region they
+// were drawn into, in PSRAM. Drawing one again (a page flip, Home again after a menu or a
+// sync) is then a memory copy instead of opening and decoding a BMP on the SD card. The
+// snapshot is the 1-bit packed panel region, about 3 to 8 KB a cover. Boards without
+// PSRAM never fill it. Each wake starts empty, and opening a book frees it.
+struct CachedCover {
+  std::string path;
+  int16_t slotX = 0, slotY = 0, slotW = 0, slotH = 0;
+  int16_t x = 0, y = 0, w = 0, h = 0;  // the fitted rect the snapshot covers
+  uint8_t orientation = 0;
+  bool onBlack = false;
+  bool inverted = false;
+  uint32_t lastUse = 0;
+  size_t bytes = 0;
+  HeapByteBuffer data;
+};
+constexpr size_t kCachedCovers = 16;
+CachedCover gCoverCache[kCachedCovers];
+uint32_t gCoverUseClock = 0;
+
+bool sameSlot(const CachedCover& cover, const char* path, const Rect& slot, const uint8_t orientation,
+              const bool onBlack, const bool inverted) {
+  return cover.data && cover.slotX == slot.x && cover.slotY == slot.y && cover.slotW == slot.width &&
+         cover.slotH == slot.height && cover.orientation == orientation && cover.onBlack == onBlack &&
+         cover.inverted == inverted && cover.path == path;
+}
 }  // namespace
+
+void BookOrbitHomeTiles::releaseCoverCache() {
+  for (CachedCover& cover : gCoverCache) cover = CachedCover{};
+}
 
 std::string BookOrbitHomeTiles::coverPath(const RecentBook& book, const int width, const int height) {
   if (book.coverBmpPath.empty()) return {};
@@ -173,6 +207,19 @@ void BookOrbitHomeTiles::drawCover(const RecentBook& book, const Rect& slot, con
 }
 
 void BookOrbitHomeTiles::drawCoverFile(const char* path, const Rect& slot, const bool onBlack) const {
+  const uint8_t orientation = static_cast<uint8_t>(renderer.getOrientation());
+  const bool inverted = SETTINGS.screenInverted != 0;
+  if (path[0] != '\0') {
+    for (CachedCover& cover : gCoverCache) {
+      if (!sameSlot(cover, path, slot, orientation, onBlack, inverted)) continue;
+      if (renderer.copyBufferToRegion(cover.x, cover.y, cover.w, cover.h, cover.data.get(), cover.bytes)) {
+        cover.lastUse = ++gCoverUseClock;
+        return;
+      }
+      cover = CachedCover{};
+      break;
+    }
+  }
   if (path[0] != '\0' && Storage.exists(path)) {
     HalFile file;
     if (Storage.openFileForRead("HOME", path, file)) {
@@ -183,6 +230,7 @@ void BookOrbitHomeTiles::drawCoverFile(const char* path, const Rect& slot, const
         renderer.drawBitmap(bitmap, fitted.x, fitted.y, fitted.width, fitted.height);
         renderer.drawRect(fitted.x, fitted.y, fitted.width, fitted.height, !onBlack);
         file.close();
+        rememberCover(path, slot, fitted, orientation, onBlack, inverted);
         return;
       }
       file.close();
@@ -194,4 +242,46 @@ void BookOrbitHomeTiles::drawCoverFile(const char* path, const Rect& slot, const
     drawLucideIcon(renderer, icon_book_open_32, slot.x + (slot.width - icon_book_open_32.w) / 2,
                    slot.y + (slot.height - icon_book_open_32.h) / 2);
   }
+}
+
+void BookOrbitHomeTiles::rememberCover(const char* path, const Rect& slot, const Rect& fitted,
+                                       const uint8_t orientation, const bool onBlack, const bool inverted) const {
+  if (!psramHeapAvailable()) return;
+  // The least recently drawn entry makes room; the Home and Library pages show 9 at most.
+  CachedCover* target = &gCoverCache[0];
+  for (CachedCover& cover : gCoverCache) {
+    if (!cover.data) {
+      target = &cover;
+      break;
+    }
+    if (cover.lastUse < target->lastUse) target = &cover;
+  }
+  const size_t bytes = renderer.getRegionByteSize(fitted.x, fitted.y, fitted.width, fitted.height);
+  if (bytes == 0) return;
+  if (!target->data || target->bytes < bytes) {
+    target->data = makePsramByteBufferNoThrow(bytes);
+    if (!target->data) {
+      LOG_DBG("HOME", "No PSRAM for a cover snapshot (%u bytes)", static_cast<unsigned>(bytes));
+      *target = CachedCover{};
+      return;
+    }
+  }
+  target->bytes = bytes;
+  if (!renderer.copyRegionToBuffer(fitted.x, fitted.y, fitted.width, fitted.height, target->data.get(), bytes)) {
+    *target = CachedCover{};
+    return;
+  }
+  target->path = path;
+  target->slotX = static_cast<int16_t>(slot.x);
+  target->slotY = static_cast<int16_t>(slot.y);
+  target->slotW = static_cast<int16_t>(slot.width);
+  target->slotH = static_cast<int16_t>(slot.height);
+  target->x = static_cast<int16_t>(fitted.x);
+  target->y = static_cast<int16_t>(fitted.y);
+  target->w = static_cast<int16_t>(fitted.width);
+  target->h = static_cast<int16_t>(fitted.height);
+  target->orientation = orientation;
+  target->onBlack = onBlack;
+  target->inverted = inverted;
+  target->lastUse = ++gCoverUseClock;
 }

@@ -29,6 +29,7 @@
 #include "browser/BookOrbitCatalogListCache.h"
 #include "browser/OpdsBookBrowserActivity.h"
 #include "components/TouchRegistry.h"
+#include "components/themes/bookorbit/BookOrbitHomeTiles.h"
 #include "home/AlertActivity.h"
 #include "home/CrashActivity.h"
 #include "home/FileBrowserActivity.h"
@@ -1068,6 +1069,7 @@ void ActivityManager::goToReader(std::string path, const bool suppressBackReleas
   // OPDS credentials are unrelated to local reading and may contain several
   // heap-backed strings. Home reloads them lazily when it becomes active.
   OPDS_STORE.release();
+  BookOrbitHomeTiles::releaseCoverCache();
   replaceActivity(std::make_unique<ReaderActivity>(renderer, mappedInput, std::move(path), suppressBackRelease,
                                                    allowFastInitialRefresh, cleanImageBaseOnEntry));
 }
