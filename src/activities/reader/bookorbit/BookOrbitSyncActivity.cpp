@@ -26,6 +26,7 @@
 #include "BookOrbitStatsUpload.h"
 #include "BookOrbitSyncMarkerFile.h"
 #include "BookOrbitSyncScreens.h"
+#include "BookPrep.h"
 #include "CrossPointSettings.h"
 #include "CrossPointState.h"
 #include "KOReaderDocumentId.h"
@@ -350,8 +351,9 @@ void BookOrbitSyncActivity::runSleepSync() {
   }
 #if CROSSINK_APP_SLEEP_AUTO_DOWNLOAD
   // Then the books added to the server since the last sleep, still on this connection.
+  BookOrbitAutoDownload::Summary added;
   if (serverAnswered && !sleepSyncWakeRequested()) {
-    const BookOrbitAutoDownload::Summary added = BookOrbitAutoDownload::run(&sleepSyncWakeRequested);
+    added = BookOrbitAutoDownload::run(&sleepSyncWakeRequested);
     if (added.downloaded > 0 || added.cardFull) {
       LOG_INF("BookOrbit", "New books: %u downloaded%s", static_cast<unsigned>(added.downloaded),
               added.cardFull ? ", card nearly full" : "");
@@ -368,6 +370,15 @@ void BookOrbitSyncActivity::runSleepSync() {
   if (syncHome && !sleepSyncWakeRequested()) {
     BookOrbitHomeStore::decodePendingCovers(&sleepSyncWakeRequested, homeCoverSizes);
   }
+  // Offline, on the heap Wi-Fi just gave back, and still behind the sleep screen: the work
+  // the next screens would otherwise make you wait for (see BookPrep).
+  if (!sleepSyncWakeRequested()) BookPrep::refreshLibraryIndex(&sleepSyncWakeRequested);
+#if CROSSINK_APP_SLEEP_AUTO_DOWNLOAD
+  for (uint8_t i = 0; i < added.downloaded && !sleepSyncWakeRequested(); i++) {
+    BookPrep::prepareEpub(added.paths[i], renderer);
+  }
+#endif
+  if (bookOrbitHome && !sleepSyncWakeRequested()) BookPrep::prepareHomeCovers(renderer, &sleepSyncWakeRequested);
   LOG_INF("BookOrbit", "Sleep sync over (state=%d)", static_cast<int>(state));
 #ifdef SIMULATOR
   endSimulatorScenarioIfRequested(static_cast<int>(state));

@@ -3,6 +3,7 @@
 #include <BoardConfig.h>
 
 #include <cstdint>
+#include <string>
 
 // Downloads the books added to BookOrbit's Recently Added since the option was turned on,
 // behind the sleep screen, on the connection the sleep sync already holds.
@@ -27,6 +28,9 @@ void setEnabled(bool enabled);
 struct Summary {
   uint8_t downloaded = 0;
   bool cardFull = false;
+  // Where each downloaded book landed (the first `downloaded` entries), for the sleep sync
+  // to prepare them (BookPrep::prepareEpub) once Wi-Fi is off.
+  std::string paths[MAX_BOOKS_PER_SLEEP];
 };
 
 // One pass, on a connection that is already up. Every book it takes, downloaded or found
