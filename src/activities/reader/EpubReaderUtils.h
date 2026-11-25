@@ -10,6 +10,7 @@
 
 #include "util/BookContentId.h"
 #include "util/FileContentEquals.h"
+#include "util/ProgressSaveTime.h"
 
 namespace EpubReaderUtils {
 
@@ -180,8 +181,28 @@ inline bool writeProgressFileAtomic(const std::string& progressPath, const uint8
   return true;
 }
 
+// Whether a save is a new place to read from, rather than the same place written again
+// (reopening, a menu exit) or laid out again under another font: the text offset says
+// where the page starts whatever its number; without one, the page is scaled to the new
+// chapter page count before comparing.
+inline bool positionMoved(const Progress& previous, const int spineIndex, const int pageNumber, const int pageCount,
+                          const std::optional<uint32_t>& visibleTextOffset) {
+  if (previous.spineIndex != spineIndex) return true;
+  if (previous.hasVisibleTextOffset && visibleTextOffset.has_value()) {
+    return previous.visibleTextOffset != *visibleTextOffset;
+  }
+  int previousPage = previous.pageNumber;
+  if (previous.hasPageCount && previous.pageCount > 1 && pageCount > 1 && previous.pageCount != pageCount) {
+    const int64_t span = previous.pageCount - 1;
+    previousPage =
+        static_cast<int>((static_cast<int64_t>(previous.pageNumber) * (pageCount - 1) * 2 + span) / (span * 2));
+  }
+  return previousPage != pageNumber;
+}
+
 // Persists reader progress for an EPUB to both of its homes (see loadProgress). Returns
-// true when every attempted write succeeded.
+// true when every attempted write succeeded. A save that moves the position also dates
+// the move (ProgressSaveTime), which BookOrbit sync compares with the server's date.
 inline bool saveProgress(const Epub& epub, int spineIndex, int pageNumber, int pageCount,
                          const std::optional<uint32_t> visibleTextOffset = std::nullopt) {
   if (spineIndex < 0 || spineIndex > 0xFFFF || pageNumber < 0 || pageNumber > 0xFFFF || pageCount < 0 ||
@@ -212,7 +233,12 @@ inline bool saveProgress(const Epub& epub, int spineIndex, int pageNumber, int p
   bool stateOk = true;
   const std::string stateDir = BookContentId::bookStateDir(epub.getPath());
   if (!stateDir.empty()) {
+    Progress previous;
+    const bool hadPrevious = readProgressFile("ERS", stateDir + "/progress.bin", previous);
     stateOk = writeProgressFileAtomic(stateDir + "/progress.bin", data, dataSize);
+    if (stateOk && (!hadPrevious || positionMoved(previous, spineIndex, pageNumber, pageCount, visibleTextOffset))) {
+      ProgressSaveTime::record(epub.getPath());
+    }
   }
   return pathOk && stateOk;
 }

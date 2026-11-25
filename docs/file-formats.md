@@ -818,6 +818,29 @@ Binary layout (12 bytes, little-endian):
 - `[6-7]` paragraph index (`uint16_t`, `0xFFFF` when unknown)
 - `[8-11]` progress within the spine item (`float`, 0 to 1)
 
+## `progress_time.bin`
+
+### Version 1
+
+`progress_time.bin` records when the book's reading position last moved on this device, in
+the book's content-keyed state directory (`/.crosspoint/book_<contentHash>/`). It is written
+by every progress save that changes the position (a new chapter, a different text offset,
+or a different page once scaled to the same page count), so reopening a book or laying it
+out again under another font does not count as a newer save. Nothing is written while the
+clock is not trusted. BookOrbit's unattended syncs (the sleep sync, its pass over the other
+recent books, and the sync when a book opens with Wi-Fi at Home) compare it with the
+server's progress date: the position saved most recently wins.
+
+The era lets a time recorded before an NTP sync be corrected for the drift that sync
+measured (`WallClock::correctionForEvent`), like the queued reading stats.
+
+Binary layout (12 bytes, little-endian):
+
+- `[0-3]` magic (`uint32_t` `0x424F5054`)
+- `[4-7]` save time (`uint32_t`, UTC epoch seconds by the device clock)
+- `[8-9]` clock era (`uint16_t`, `WallClock::era()` truncated)
+- `[10-11]` reserved, 0
+
 ## `replaced_chapters.bin`
 
 ### Version 1
