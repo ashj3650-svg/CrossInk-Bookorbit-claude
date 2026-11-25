@@ -302,7 +302,7 @@ void BookOrbitCatalogBrowserActivity::onEnter() {
   } else {
     BookOrbitCatalogListCache::clear();
     // A BOOKORBIT_CATALOG boot the BookOrbit Home asked for brings its link on the SD card.
-    if (networkBoot && entryLink.bookId == 0 && entryLink.sectionId.empty()) {
+    if (networkBoot && entryLink.empty()) {
       BookOrbitCatalogListCache::takeEntryLink(entryLink);
     }
   }
@@ -366,6 +366,12 @@ void BookOrbitCatalogBrowserActivity::onWifiSelectionComplete(const bool connect
     return;
   }
   sdFontSystem.releaseForNetwork(renderer);
+  if (!entryLink.series.empty()) {
+    const BookOrbitCatalogLink link = std::move(entryLink);
+    entryLink = BookOrbitCatalogLink{};
+    downloadNextInSeries(link.series, link.seriesAfter);
+    return;
+  }
   if (entryLink.bookId != 0) {
     // Back from the download lands on the listing the Home shelf drew from.
     const BookOrbitCatalogLink link = std::move(entryLink);
@@ -397,6 +403,60 @@ void BookOrbitCatalogBrowserActivity::onWifiSelectionComplete(const bool connect
       openBookListing(BookOrbitCatalogClient::sectionBookQuery(link.sectionId), link.title, /*fromFacet=*/false);
     }
   }
+}
+
+void BookOrbitCatalogBrowserActivity::downloadNextInSeries(const std::string& series, const float after) {
+  // Like a Home shelf book, the session ends with this one book: it opens, or a failure's
+  // message is dismissed to Home.
+  downloadFromHome = true;
+  openDownloaded = true;
+  navLevel = NavLevel::Books;
+  listQuery = BookOrbitBookQuery{};
+  listQuery.sort = "series";
+  listQuery.series = series;
+  listTitle = series;
+  listPage = 1;
+  booksFromFacet = false;
+  showLoadingBeforeFetch();
+
+  // A series rarely runs past a page; a long one is read a few pages deep.
+  constexpr int MAX_PAGES = 5;
+  constexpr float SAME_NUMBER = 0.0001f;
+  BookOrbitCatalogBook next;
+  bool found = false;
+  for (int page = 1; page <= MAX_PAGES; page++) {
+    BookOrbitBookPage result;
+    if (!BookOrbitCatalogClient::fetchBooks(listQuery, page, result)) {
+      state = BrowserState::ERROR;
+      errorMessage = BookOrbitCatalogClient::lastFetchBadResponse ? tr(STR_BOOKORBIT_CATALOG_BAD_RESPONSE)
+                                                                  : tr(STR_BOOKORBIT_CATALOG_ERROR);
+      requestUpdate();
+      return;
+    }
+    // A book without a number compares false either way, so it is never picked.
+    for (BookOrbitCatalogBook& book : result.books) {
+      if (book.seriesIndex > after + SAME_NUMBER && (!found || book.seriesIndex < next.seriesIndex)) {
+        next = std::move(book);
+        found = true;
+      }
+    }
+    if (result.books.empty() || page * std::max(result.pageSize, 1) >= result.total) break;
+  }
+  if (!found) {
+    LOG_INF("BookOrbit", "No book after #%g in series \"%s\"", static_cast<double>(after), series.c_str());
+    state = BrowserState::ERROR;
+    errorMessage = tr(STR_SERIES_NEXT_NOT_FOUND);
+    requestUpdate();
+    return;
+  }
+  LOG_INF("BookOrbit", "Next in series \"%s\": book %lld (#%g)", series.c_str(), static_cast<long long>(next.id),
+          static_cast<double>(next.seriesIndex));
+  std::string path;
+  if (BookOrbitDownloadIndex::lookup(next.id, path)) {
+    openLocalBook(path);
+    return;
+  }
+  downloadBook(next.id, next.title, "", /*openExisting=*/true);
 }
 
 void BookOrbitCatalogBrowserActivity::showLoadingBeforeFetch() {
@@ -1373,7 +1433,7 @@ void BookOrbitCatalogBrowserActivity::transferBook(const int64_t bookId, const i
   if (result == HttpDownloader::OK) {
     // On device is recounted by the next root.
     localOnDeviceCount = -1;
-    if (!reopenPath.empty()) {
+    if (!reopenPath.empty() || openDownloaded) {
       openLocalBook(finalPath);
       return;
     }

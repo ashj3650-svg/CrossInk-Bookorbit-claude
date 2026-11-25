@@ -304,48 +304,68 @@ void BookOrbitSyncActivity::runSleepSync() {
   const bool bookOrbitHome = UITheme::hasBookOrbitHome();
   if (bookOrbitHome) BookOrbitDeviceScan::prepare(&sleepSyncWakeRequested);
   wifiActivated = true;
-  bool wifiConnectedForSleepSync = false;
+  bool connected = false;
   if (SavedWifiConnect::connect(&sleepSyncWakeRequested)) {
-    wifiConnectedForSleepSync = true;
-    // The whole sync runs synchronously from here, decisions included.
-    onWifiSelectionComplete(true);
+    connected = true;
+    if (epubPath.empty()) {
+      // No EPUB open (see startBookOrbitSleepSync()): only the library steps below.
+      WiFi.setSleep(false);
+      sdFontSystem.releaseForNetwork(renderer);
+      syncClock();
+      state = SYNC_COMPLETE;
+    } else {
+      // The whole sync runs synchronously from here, decisions included.
+      onWifiSelectionComplete(true);
+    }
   } else if (!stopIfWoken()) {
     LOG_INF("BookOrbit", "Sleep sync skipped: no saved network answered");
   }
   syncSession.reset();
+  // A failed sync of the open book means the server or the account is unreachable: no
+  // point trying the rest. Each step below is retried by the next sync, so a wake press
+  // can end it anywhere.
+  const bool serverAnswered = connected && state != SYNC_FAILED;
+  if (connected && !serverAnswered) LOG_INF("BookOrbit", "Sleep sync failed: the rest waits for the next one");
 #if CROSSINK_APP_RECENT_BOOKS_SYNC
-  // Then the other recent books' positions, on the same connection. A failed sync of the
-  // open book means the server or the account is unreachable: no point trying the rest.
-  if (wifiConnectedForSleepSync && state != SYNC_FAILED && !sleepSyncWakeRequested()) {
+  // Then the other recent books' positions, on the same connection.
+  if (serverAnswered && !sleepSyncWakeRequested()) {
     const BookOrbitRecentSync::Summary recent =
         BookOrbitRecentSync::syncRecentBooks(renderer, epubPath, &sleepSyncWakeRequested);
     LOG_INF("BookOrbit", "Recent books: %u checked, %u updated here, %u sent", static_cast<unsigned>(recent.checked),
             static_cast<unsigned>(recent.applied), static_cast<unsigned>(recent.uploaded));
   }
 #endif
+  // Then the BookOrbit Home, once every position has reached the server, so its reading
+  // rows and stats include this sleep's. It comes before the downloads: they are the long
+  // step, a wake press during one used to cost the Home its sync, and the snapshot's
+  // requests (with their heap floor) then run before a run of multi-MB TLS transfers has
+  // churned the heap. Its tile dates the
+  // snapshot as the last sync: a sync that failed leaves it as it was, or the tile would
+  // report as done a sync whose progress never reached the server.
+  const bool syncHome = serverAnswered && bookOrbitHome;
+  const auto homeCoverSizes = BookOrbitHomeLayout::coverSizes(renderer);
+  if (syncHome && !sleepSyncWakeRequested()) {
+    const bool refreshed = BookOrbitHomeStore::refresh(&sleepSyncWakeRequested, homeCoverSizes);
+    LOG_INF("BookOrbit", "Home sync %s", refreshed ? "done" : "left for the next sync");
+  }
 #if CROSSINK_APP_SLEEP_AUTO_DOWNLOAD
-  // Then the books added to the server since the last sleep, still on this connection and
-  // before the Home refresh, so its scan already counts them as on the device.
-  if (wifiConnectedForSleepSync && state != SYNC_FAILED && !sleepSyncWakeRequested()) {
+  // Then the books added to the server since the last sleep, still on this connection.
+  if (serverAnswered && !sleepSyncWakeRequested()) {
     const BookOrbitAutoDownload::Summary added = BookOrbitAutoDownload::run(&sleepSyncWakeRequested);
     if (added.downloaded > 0 || added.cardFull) {
       LOG_INF("BookOrbit", "New books: %u downloaded%s", static_cast<unsigned>(added.downloaded),
               added.cardFull ? ", card nearly full" : "");
     }
+    // The snapshot above predates them: list them on New on your reader, with covers.
+    if (added.downloaded > 0 && syncHome && !sleepSyncWakeRequested()) {
+      BookOrbitHomeStore::refreshNewBooksShelf(&sleepSyncWakeRequested, homeCoverSizes);
+    }
   }
 #endif
-  // The BookOrbit Home draws from what this boot's network leaves behind. Each step is
-  // retried by the next sync, so a wake press can end it anywhere. Its tile dates the
-  // snapshot as the last sync: a sync that failed for the book leaves it as it was, or
-  // the tile would report as done a sync whose progress never reached the server.
-  const bool homeShown = wifiConnectedForSleepSync && bookOrbitHome;
-  const bool refreshHome = homeShown && state != SYNC_FAILED;
-  if (homeShown && !refreshHome) LOG_INF("BookOrbit", "Sleep sync failed: the Home snapshot stays as it was");
-  const auto homeCoverSizes = BookOrbitHomeLayout::coverSizes(renderer);
-  if (refreshHome && !sleepSyncWakeRequested()) BookOrbitHomeStore::refresh(&sleepSyncWakeRequested, homeCoverSizes);
-  if (refreshHome && !sleepSyncWakeRequested()) BookOrbitDeviceScan::run(&sleepSyncWakeRequested);
+  // After the downloads, so the scan already counts them as on the device.
+  if (syncHome && !sleepSyncWakeRequested()) BookOrbitDeviceScan::run(&sleepSyncWakeRequested);
   SavedWifiConnect::disconnect();
-  if (refreshHome && !sleepSyncWakeRequested()) {
+  if (syncHome && !sleepSyncWakeRequested()) {
     BookOrbitHomeStore::decodePendingCovers(&sleepSyncWakeRequested, homeCoverSizes);
   }
   LOG_INF("BookOrbit", "Sleep sync over (state=%d)", static_cast<int>(state));
@@ -376,6 +396,15 @@ bool BookOrbitSyncActivity::consumeInitialConfirmRelease() {
   return true;
 }
 
+void BookOrbitSyncActivity::syncClock() {
+  // Capture the pre-NTP clock so WallClock can compute this power era's correction
+  // delta; queued stats stamped before this moment get fixed to exact time.
+  uint32_t epochBeforeNtp = 0;
+  WallClock::now(epochBeforeNtp);
+  syncTimeWithNTP();
+  WallClock::markNtpSynced(epochBeforeNtp);
+}
+
 void BookOrbitSyncActivity::onWifiSelectionComplete(const bool success) {
   if (!success) {
     LOG_DBG("BookOrbit", "WiFi connection failed, exiting");
@@ -394,12 +423,7 @@ void BookOrbitSyncActivity::onWifiSelectionComplete(const bool success) {
   }
   requestUpdate(true);
 
-  // Capture the pre-NTP clock so WallClock can compute this power era's correction
-  // delta; queued stats stamped before this moment get fixed to exact time below.
-  uint32_t epochBeforeNtp = 0;
-  WallClock::now(epochBeforeNtp);
-  syncTimeWithNTP();
-  WallClock::markNtpSynced(epochBeforeNtp);
+  syncClock();
   if (stopIfWoken()) return;
 
   setStatus(tr(STR_CALC_HASH));

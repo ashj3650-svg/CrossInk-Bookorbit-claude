@@ -82,6 +82,23 @@ bool uploadLocal(const std::shared_ptr<Epub>& epub, const std::string& documentH
   return true;
 }
 
+// Neither side moved since this device last synced the book: the server still holds the
+// position dated by the marker, and the saved one here is still the marker's. Read from
+// the progress files alone, which spares the EPUB's load and the mapping of the server's
+// position into its pages, the costly part of a book that has nothing to sync. Any doubt
+// (another date, a position or page count that differs, no marker) takes the full path.
+bool unchangedSinceLastSync(const Epub& epub, const KOReaderProgress& remote) {
+  if (remote.timestamp <= 0) return false;
+  const std::string stateDir = BookContentId::bookStateDirName(epub.getPath());
+  if (stateDir.empty()) return false;
+  const BookOrbitSmartSync::Marker marker = BookOrbitSyncMarkerFile::read(stateDir);
+  if (!marker.hasPosition() || marker.timestamp != remote.timestamp) return false;
+  EpubReaderUtils::Progress local;
+  if (!EpubReaderUtils::loadProgress(epub, local, "BORS") || !local.hasPageCount) return false;
+  return local.spineIndex == marker.spineIndex && local.pageNumber == marker.pageNumber &&
+         local.pageCount == marker.pageCount;
+}
+
 // One book, on the connection (and Session) the caller holds open.
 Outcome syncBook(GfxRenderer& renderer, const std::string& path, const bool allowUpload) {
   if (!FsHelpers::hasEpubExtension(path) || !Storage.exists(path.c_str())) return Outcome::Skipped;
@@ -102,6 +119,10 @@ Outcome syncBook(GfxRenderer& renderer, const std::string& path, const bool allo
   // needs no EPUB in memory at all.
   if (fetched == BookOrbitSyncClient::NOT_FOUND && !allowUpload) return Outcome::Unchanged;
   auto epub = std::make_shared<Epub>(path, "/.crosspoint");
+  if (fetched == BookOrbitSyncClient::OK && unchangedSinceLastSync(*epub, remote)) {
+    LOG_DBG("BORS", "%s: neither side moved since the last sync", path.c_str());
+    return Outcome::Unchanged;
+  }
   if (!epub->load(true, SETTINGS.embeddedStyle == 0)) {
     LOG_ERR("BORS", "Could not load %s", path.c_str());
     return Outcome::Skipped;

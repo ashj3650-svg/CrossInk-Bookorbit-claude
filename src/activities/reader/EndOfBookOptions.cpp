@@ -1,20 +1,22 @@
 #include "EndOfBookOptions.h"
 
+#include <BookOrbitCredentialStore.h>
 #include <FsHelpers.h>
 #include <GfxRenderer.h>
 #include <I18n.h>
 
-#include <algorithm>
-#include <iterator>
-
 #include "CrossPointSettings.h"
 #include "ReaderUtils.h"
+#include "activities/Activity.h"
+#include "activities/ActivityManager.h"
+#include "activities/browser/BookOrbitCatalogLink.h"
 #include "components/UITheme.h"
 #include "components/UIThemeTokens.h"
 #include "components/UiAppHelpers.h"
 #include "fontIds.h"
 #include "util/ButtonNavigator.h"
 #include "util/NextBookFinder.h"
+#include "util/SeriesNextFinder.h"
 
 namespace fui = freeink::ui;
 
@@ -31,16 +33,45 @@ std::string displayName(const std::string& filename) {
 EndOfBookOptions::EndOfBookOptions(GfxRenderer& renderer)
     : renderer(renderer), uiTarget(makeUiTarget(renderer)), app(uiTarget, uiTarget.deviceContext()) {}
 
+void EndOfBookOptions::addRow(std::string label, std::string path) {
+  rowLabels.push_back(std::move(label));
+  rowPaths.push_back(std::move(path));
+}
+
 void EndOfBookOptions::loadOnce(const std::string& currentBookPath) {
   if (isLoaded.load(std::memory_order_acquire)) {
     return;
   }
-  folder = FsHelpers::extractFolderPath(currentBookPath);
-  names = NextBookFinder::findNextBooks(currentBookPath, MAX_SUGGESTIONS);
   selector.store(0, std::memory_order_relaxed);
-  if (!names.empty()) {
-    rowLabels.reserve(names.size() + 1);
-    std::transform(names.begin(), names.end(), std::back_inserter(rowLabels), displayName);
+  rowLabels.reserve(MAX_SUGGESTIONS + 1);
+  rowPaths.reserve(MAX_SUGGESTIONS);
+
+  // The series first: its next book when it is on the card, else (or when the card skips a
+  // number) a row that looks it up on BookOrbit.
+  SeriesNextFinder::Result next;
+  if (SeriesNextFinder::find(currentBookPath, next)) {
+    if (!next.nextPath.empty()) {
+      addRow(std::string(tr(STR_EOB_NEXT_IN_SERIES)) + next.nextTitle, next.nextPath);
+    }
+    constexpr float NEXT_NUMBER = 1.001f;  // a whole number on, with room for float rounding
+    const bool numberMissing = next.nextPath.empty() || next.nextPosition > next.position + NEXT_NUMBER;
+    if (numberMissing && BOOKORBIT_STORE.hasCredentials()) {
+      seriesName = std::move(next.series);
+      position = next.position;
+      addRow(tr(STR_EOB_FIND_NEXT_ON_BOOKORBIT), std::string());
+    }
+  }
+
+  // Then the books after this one in its folder, alphabetically.
+  const std::string folder = FsHelpers::extractFolderPath(currentBookPath);
+  for (const std::string& name : NextBookFinder::findNextBooks(currentBookPath, MAX_SUGGESTIONS)) {
+    if (rowPaths.size() >= MAX_SUGGESTIONS) break;
+    std::string path = folder == "/" ? "/" + name : folder + "/" + name;
+    if (path == next.nextPath) continue;
+    addRow(displayName(name), std::move(path));
+  }
+
+  if (!rowPaths.empty()) {
     rowLabels.emplace_back(tr(STR_EOB_HOME));
     rowCount = static_cast<uint16_t>(rowLabels.size());
     for (uint16_t index = 0; index < rowCount; ++index) {
@@ -60,18 +91,26 @@ void EndOfBookOptions::loadOnce(const std::string& currentBookPath) {
 
 bool EndOfBookOptions::loaded() const { return isLoaded.load(std::memory_order_acquire); }
 
-bool EndOfBookOptions::menuActive() const { return loaded() && !names.empty(); }
+bool EndOfBookOptions::menuActive() const { return loaded() && !rowPaths.empty(); }
 
-std::string EndOfBookOptions::fullPath(const size_t index) const {
-  if (index >= names.size()) {
-    return {};
-  }
-  return folder == "/" ? "/" + names[index] : folder + "/" + names[index];
+EndOfBookOptions::Action EndOfBookOptions::selectRow(const size_t row, std::string* openPath) const {
+  if (row >= rowPaths.size()) return Action::GoHome;  // the "Home" row
+  if (rowPaths[row].empty()) return Action::FindNextInSeries;
+  if (openPath) *openPath = rowPaths[row];
+  return Action::OpenBook;
+}
+
+void EndOfBookOptions::findNextOnBookOrbit() const {
+  BookOrbitCatalogLink link;
+  link.title = seriesName;
+  link.series = seriesName;
+  link.seriesAfter = position;
+  activityManager.goToBookOrbitCatalog(std::move(link));
 }
 
 void EndOfBookOptions::onRowEvent(const fui::ActionEvent& event, void* user) {
   auto* self = static_cast<EndOfBookOptions*>(user);
-  if (event.value < 0 || event.value > static_cast<int16_t>(self->names.size())) return;
+  if (event.value < 0 || event.value > static_cast<int16_t>(self->rowPaths.size())) return;
   self->selector.store(event.value, std::memory_order_relaxed);
   // The tapped row leaves this screen (open book or home); a lingering flash
   // would gray an unrelated element on the next render.
@@ -85,15 +124,8 @@ EndOfBookOptions::Action EndOfBookOptions::handleMenuInput(const MappedInputMana
     const fui::InputSnapshot snap = touchSnapshotFrom(input);
     if (snap.touchPressed || snap.touchReleased) {
       const auto event = app.route(snap);
-      if (event.action == ACTION_ROW && event.value >= 0 && event.value <= static_cast<int16_t>(names.size())) {
-        const auto tappedRow = static_cast<size_t>(event.value);
-        if (tappedRow < names.size()) {
-          if (openPath) {
-            *openPath = fullPath(tappedRow);
-          }
-          return Action::OpenBook;
-        }
-        return Action::GoHome;  // "Home" row tapped
+      if (event.action == ACTION_ROW && event.value >= 0 && event.value <= static_cast<int16_t>(rowPaths.size())) {
+        return selectRow(static_cast<size_t>(event.value), openPath);
       }
       if (app.invalidated()) {
         return Action::Redraw;
@@ -103,13 +135,7 @@ EndOfBookOptions::Action EndOfBookOptions::handleMenuInput(const MappedInputMana
 
   const int selectedIndex = selector.load(std::memory_order_relaxed);
   if (input.wasReleased(MappedInputManager::Button::Confirm)) {
-    if (selectedIndex < static_cast<int>(names.size())) {
-      if (openPath) {
-        *openPath = fullPath(selectedIndex);
-      }
-      return Action::OpenBook;
-    }
-    return Action::GoHome;  // "Home" entry selected
+    return selectRow(static_cast<size_t>(selectedIndex), openPath);
   }
 
   // Short-press Back returns to the last page; a long press falls through to the
@@ -119,7 +145,7 @@ EndOfBookOptions::Action EndOfBookOptions::handleMenuInput(const MappedInputMana
   }
 
   // Side-button navigation follows each button's configured short action.
-  const int itemCount = static_cast<int>(names.size()) + 1;  // + "Home" entry
+  const int itemCount = static_cast<int>(rowPaths.size()) + 1;  // + "Home" entry
   if (input.wasReleased(MappedInputManager::Button::PageBack) || input.wasReleased(MappedInputManager::Button::Left)) {
     selector.store(ButtonNavigator::previousIndex(selectedIndex, itemCount),
                    std::memory_order_relaxed);  // wraps to the bottom

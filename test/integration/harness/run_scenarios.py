@@ -45,7 +45,9 @@ INTEGRATION = ROOT / "test" / "integration"
 sys.path.insert(0, str(INTEGRATION / "seed"))
 from kosync import BASE_URL, AdminClient, KosyncDevice, kodatetime, partial_md5, request_json  # noqa: E402
 
-PROGRAM = ROOT / ".pio" / "build" / "simulator" / "program"
+# CROSSINK_SIM_PROGRAM picks another simulator build, such as x4-classic-simulator's: the
+# PSRAM-board features (recent-book sync, new-book downloads) only exist there.
+PROGRAM = Path(os.environ.get("CROSSINK_SIM_PROGRAM", str(ROOT / ".pio" / "build" / "simulator" / "program")))
 
 # The simulator's fixed fake MAC (simulator package esp_mac.h) drives both the
 # credential obfuscation and the device id the firmware reports to the server.
@@ -288,6 +290,24 @@ def bookmark_key(datetime: str, pos: str) -> str:
 # /.crosspoint/bookorbit_downloads.bin, written and read from docs/file-formats.md
 # rather than from the firmware source, so the scenarios also hold the doc to account.
 DOWNLOAD_INDEX = ".crosspoint/bookorbit_downloads.bin"
+
+# How a catalog download starts depends on the simulator profile: the X3/X4 one (no PSRAM)
+# restarts into a download boot first, the PSRAM ones (x4-classic, x4-pro, sticky) queue
+# the book on a background task and stay where they are.
+DOWNLOAD_START = re.compile(r"Restarting into the download of book (\d+)|\[BOBG\] Book (\d+) queued")
+
+
+def download_start(output: str) -> tuple[re.Match, int, bool] | None:
+    """The first download the run started: its log line, the book id and whether it restarted."""
+    match = DOWNLOAD_START.search(output)
+    if not match:
+        return None
+    restarted = match.group(1) is not None
+    return match, int(match.group(1) or match.group(2)), restarted
+
+
+def background_download_done(output: str, book_id: int) -> bool:
+    return re.search(rf"\[BOBG\] Book {book_id} -> .*: result 0\b", output) is not None
 
 
 def download_index_crc() -> int:
@@ -802,10 +822,17 @@ def scenario_home_download_returns_home(verbose: bool) -> None:
         # Library page, then its first stop: the first Discover cover, not on the card yet.
         output = run_simulator(fs, input_script="3000:RIGHT:120;4500:CONFIRM:120", choice="none", timeout_s=60,
                                verbose=verbose)
-        assert "Restarting into the download of book" in output, "the shelf book did not start a download"
+        started = download_start(output)
+        assert started, "the shelf book did not start a download"
+        _, book_id, restarted = started
         downloaded = output.index("Downloading file")
         after = output[downloaded:]
-        assert "Card space read" in after, "Home did not open after the download"
+        if restarted:
+            assert "Card space read" in after, "Home did not open after the download"
+        else:
+            # Downloaded behind Home, which never left.
+            assert background_download_done(output, book_id), "the background download did not finish"
+            assert "Entering activity: BookOrbitCatalogBrowser" not in output, "the download opened the catalog"
         assert "Listing page" not in after, "the download went back to a catalog listing"
         assert not (fs.crosspoint / "bookorbit_download.json").exists(), "the download was left to resume"
 
@@ -849,7 +876,8 @@ HOME_BOOK = struct.Struct("<iIBB46s")
 # book count, then its four books.
 HOME_SHELF_HEAD = struct.Struct("<B20s46sB")
 HOME_SHELF_SIZE = HOME_SHELF_HEAD.size + 4 * HOME_BOOK.size
-HOME_SHELF_KIND = {"discover": 0, "recently_added": 1, "want_to_read": 2, "collection": 3, "smart_scope": 4}
+HOME_SHELF_KIND = {"discover": 0, "recently_added": 1, "want_to_read": 2, "collection": 3, "smart_scope": 4,
+                   "new_on_reader": 5}
 
 
 def home_snapshot_shelves(fs: SimFs) -> list[dict]:
@@ -959,6 +987,100 @@ def scenario_sleep_sync_refreshes_home(verbose: bool) -> None:
             assert "Sleep sync over" in output, "sleep sync never ran to its end"
             refreshed = home_snapshot_header(fs) is not None
             assert refreshed == expected, f"theme {theme}: Home snapshot written={refreshed}, expected={expected}"
+
+
+def sleep_sync_with_bookorbit_home(fs: "SimFs", top_shelf: str | None = None) -> None:
+    """Sync on Sleep on, under the BookOrbit theme."""
+    fs.enable_sync_on_sleep()
+    settings = json.loads((fs.crosspoint / "crossink-settings.json").read_text())
+    settings["uiTheme"] = UI_THEME_BOOKORBIT
+    (fs.crosspoint / "crossink-settings.json").write_text(json.dumps(settings))
+    if top_shelf is not None:
+        bookorbit = json.loads((fs.crosspoint / "bookorbit.json").read_text())
+        bookorbit["homeShelfTop"] = top_shelf
+        (fs.crosspoint / "bookorbit.json").write_text(json.dumps(bookorbit))
+
+
+def scenario_sleep_sync_home_before_downloads(verbose: bool) -> None:
+    """The sleep sync refreshes the Home before it downloads new books, so a long download
+    cannot cost the Home its sync, then lists the downloads on New on your reader.
+    PSRAM boards only (x4-classic-simulator): the C3 simulator has no downloads."""
+    manifest, _ = load_seed()
+    source = INTEGRATION / "library" / manifest["progress"][2]["file"]
+    with tempfile.TemporaryDirectory(prefix="crossink-integ-") as tmp:
+        fs = SimFs(Path(tmp), manifest["kosync"])
+        sleep_sync_with_bookorbit_home(fs, top_shelf=f"{HOME_SHELF_KIND['new_on_reader']}::")
+        bookorbit = json.loads((fs.crosspoint / "bookorbit.json").read_text())
+        # Every book on the server counts as added after the watermark.
+        bookorbit.update({"autoDownloadNew": True, "autoDownloadAfter": 1, "autoDownloadAfterId": 0})
+        (fs.crosspoint / "bookorbit.json").write_text(json.dumps(bookorbit))
+        sim_path = fs.add_book(source)
+        fs.set_open_book(sim_path)
+        write_progress_bin(fs.epub_cache_dir(sim_path) / "progress.bin", 4, 0, 1)
+
+        output = run_simulator(fs, input_script="6000:POWER:120", choice="none", timeout_s=240, verbose=verbose)
+        assert "Sleep sync over" in output, "sleep sync never ran to its end"
+        if "New books:" not in output:
+            raise AssertionError("no new-book downloads: run this one against x4-classic-simulator")
+        home = output.index("Home sync done")
+        assert home < output.index("New books:"), "the Home sync came after the downloads"
+        top, _ = home_snapshot_shelves(fs)
+        assert top["kind"] == HOME_SHELF_KIND["new_on_reader"], f"top shelf is not New on your reader: {top}"
+        assert len(top["ids"]) > 0, "New on your reader does not list the books just downloaded"
+
+
+def scenario_sleep_sync_recent_books_unchanged(verbose: bool) -> None:
+    """The sleep sync's other recent books: the first sleep takes their server positions,
+    the next finds neither side moved and skips opening them, and a book read on here
+    since is sent again. PSRAM boards only (x4-classic-simulator)."""
+    manifest, _ = load_seed()
+    open_book, *others = manifest["progress"][2:5]
+    with tempfile.TemporaryDirectory(prefix="crossink-integ-") as tmp:
+        fs = SimFs(Path(tmp), manifest["kosync"])
+        fs.enable_sync_on_sleep()
+        open_path = fs.add_book(INTEGRATION / "library" / open_book["file"])
+        other_paths = [fs.add_book(INTEGRATION / "library" / book["file"]) for book in others]
+        fs.set_open_book(open_path)
+        write_progress_bin(fs.epub_cache_dir(open_path) / "progress.bin", 4, 0, 1)
+        (fs.crosspoint / "recent.json").write_text(json.dumps(
+            {"books": [{"path": path} for path in [open_path, *other_paths]]}))
+
+        def sleep() -> str:
+            output = run_simulator(fs, input_script="6000:POWER:120", choice="none", timeout_s=90, verbose=verbose)
+            assert "Sleep sync over" in output, "sleep sync never ran to its end"
+            if "Recent books:" not in output:
+                raise AssertionError("no recent-book sync: run this one against x4-classic-simulator")
+            return output
+
+        first = sleep()
+        for path in other_paths:
+            assert f"{path}: took the server position" in first, f"{path} did not take the server position"
+        second = sleep()
+        for path in other_paths:
+            assert f"{path}: neither side moved since the last sync" in second, f"{path} was opened again"
+            assert f"{path}: unchanged" in second, f"{path} did not stay unchanged"
+        # Read on here: the next sleep must send it, not skip it.
+        cache = fs.epub_cache_dir(other_paths[0]) / "progress.bin"
+        spine, page, count = struct.unpack_from("<HHH", cache.read_bytes())
+        write_progress_bin(cache, spine + 1, 0, count)
+        state_copy = fs.state_dir(others[0]["hash"]) / "progress.bin"
+        if state_copy.exists():
+            write_progress_bin(state_copy, spine + 1, 0, count)
+        third = sleep()
+        assert f"{other_paths[0]}: sent this position" in third, "a book read on here was not sent"
+
+
+def scenario_sleep_sync_without_open_book(verbose: bool) -> None:
+    """With no EPUB open, the sleep sync still runs the BookOrbit Home's sync."""
+    manifest, _ = load_seed()
+    with tempfile.TemporaryDirectory(prefix="crossink-integ-") as tmp:
+        fs = SimFs(Path(tmp), manifest["kosync"])
+        sleep_sync_with_bookorbit_home(fs)
+        output = run_simulator(fs, input_script="6000:POWER:120", choice="none", timeout_s=90, verbose=verbose)
+        assert "Restarting into the BookOrbit sleep sync" in output, "sleep did not hand over to the sleep sync"
+        assert "the sleep sync does the library only" in output, "the sleep sync did not run without a book"
+        assert "Home sync done" in output, "the Home was not synced"
+        assert home_snapshot_header(fs) is not None, "no Home snapshot written"
 
 
 def scenario_sleep_sync_failure_keeps_home(verbose: bool) -> None:
@@ -2016,13 +2138,19 @@ def scenario_catalog_download_naming(verbose: bool) -> None:
             "24000:QUIT",                                 # only reached if no restart dropped it
         ])
         # The simulator's X4 profile has no PSRAM, so the download restarts into a
-        # boot of its own and the second script drives that boot.
+        # boot of its own and the second script drives that boot; a PSRAM profile
+        # downloads it behind the catalog.
         output = run_simulator(fs, input_script=script, choice="apply", timeout_s=90, verbose=verbose,
                                after_reboot_script="12000:QUIT")
-        assert "Restarting into the download of book" in output, "the download did not restart first"
-        resumed = output.index("Restarting into the download of book")
-        assert "Minimal network boot ready: target=10" in output[resumed:], "no download boot after the restart"
-        assert "Downloading file" in output[resumed:], "the download boot did not run the transfer"
+        started = download_start(output)
+        assert started, "the download did not start"
+        marker, book_id, restarted = started
+        resumed = output[marker.start():]
+        if restarted:
+            assert "Minimal network boot ready: target=10" in resumed, "no download boot after the restart"
+        else:
+            assert background_download_done(output, book_id), "the background download did not finish"
+        assert "Downloading file" in resumed, "the transfer never ran"
         assert not (fs.crosspoint / "bookorbit_download.json").exists(), "the download was left to resume"
 
         # The book that was downloaded is the first row of the listing the browser
@@ -2065,19 +2193,27 @@ def scenario_catalog_download_naming(verbose: bool) -> None:
 
         # Third run: the same file, as another app or a copy over USB would leave it at the
         # template's path, unknown to the index (here a full one of other books), so its row
-        # is not marked. Confirm finds it through the book's details and opens it rather than
-        # downloading it again, and the index records it after the books it already held.
+        # is not marked. Confirm finds it through the book's details and opens it (a PSRAM
+        # profile only marks it) rather than downloading it again, and the index records it
+        # after the books it already held.
         book_path = f"/Downloads/{device_path}"
         others = [(-1 - i, f"/Downloads/Older/Book {i}.epub", 10) for i in range(135)]
         write_download_index(fs.fs / DOWNLOAD_INDEX, others, version=2)
         output = run_simulator(fs, input_script=first_book_script, choice="apply", timeout_s=90,
                                verbose=verbose, after_reboot_script="6000:QUIT")
-        assert "Restarting into the download of book" not in output, "the copy in place downloaded again"
-        assert f"is already at {book_path}, opening it" in output, "Confirm did not find the copy in place"
+        assert "Downloading file" not in output, "the copy in place downloaded again"
+        if restarted:
+            assert f"is already at {book_path}, opening it" in output, "Confirm did not find the copy in place"
+        else:
+            # Behind the listing, the copy in place is taken as it is (result 1: already on
+            # the card) and its row marked, without opening it.
+            assert re.search(rf"\[BOBG\] Book {first['id']} -> {re.escape(book_path)}: result 1\b", output), \
+                "the background download did not take the copy in place"
         assert read_download_index(fs.fs / DOWNLOAD_INDEX) == others + [
             (first["id"], book_path, expected.stat().st_size)], "the index did not record the copy after the others"
-        state = json.loads((fs.crosspoint / "state.json").read_text())
-        assert state.get("openEpubPath") == book_path, "Confirm did not open the copy in place"
+        if restarted:
+            state = json.loads((fs.crosspoint / "state.json").read_text())
+            assert state.get("openEpubPath") == book_path, "Confirm did not open the copy in place"
 
 
 def scenario_catalog_large_local_list(verbose: bool) -> None:
@@ -2257,8 +2393,9 @@ def scenario_catalog_deep_listing(verbose: bool) -> None:
         output = run_simulator(fs, input_script=script, choice="apply", timeout_s=120, verbose=verbose,
                                after_reboot_script=";".join(back + ["32000:QUIT"]))
 
-        marker = re.search(r"Restarting into the download of book (\d+)", output)
-        assert marker, "the deep listing's download did not restart first"
+        started = download_start(output)
+        assert started, "the deep listing's download did not start"
+        marker, book_id, restarted = started
         before, resumed = output[:marker.start()], output[marker.end():]
 
         loads = [(int(p), source, int(rows), int(start)) for p, source, rows, start in LISTING_PAGE_LOG.findall(output)]
@@ -2275,7 +2412,6 @@ def scenario_catalog_deep_listing(verbose: bool) -> None:
         pages = sorted((c for c in caches if "total" in c and "sections" not in c and c.get("total", 0) > 60),
                        key=lambda c: c["page"])
         listing = [item for page in pages for item in page["items"]]
-        book_id = int(marker.group(1))
         row = next((i for i, item in enumerate(listing) if item["id"] == book_id), None)
         assert row is not None and row >= 60, f"the downloaded book {book_id} is not on page 4 or later (row {row})"
 
@@ -2283,6 +2419,10 @@ def scenario_catalog_deep_listing(verbose: bool) -> None:
         # have no author, which leaves an empty folder name the firmware drops).
         landed = re.search(r"Downloading file \d+ -> (\S.*?) \(free=", resumed)
         assert landed and (fs.fs / landed.group(1).lstrip("/")).exists(), "the selected book was not downloaded"
+        if not restarted:
+            # Downloaded behind the listing, which stays as it was: no window to restore.
+            assert background_download_done(output, book_id), "the background download did not finish"
+            return
 
         restored = [(int(p), int(rows), int(start)) for p, _, rows, start in LISTING_PAGE_LOG.findall(resumed)]
         last_restore = max(i for i, (p, _, _) in enumerate(restored) if p == row // 20 + 1)
@@ -2354,12 +2494,17 @@ def scenario_catalog_sort_filter(verbose: bool) -> None:
         assert listings[("recently_added", "reading", "asc")]["total"] == reading["total"], \
             "the filtered listing's total is not the server's"
 
-        marker = re.search(r"Restarting into the download of book (\d+)", output)
-        assert marker, "the sorted listing's download did not restart first"
-        assert int(marker.group(1)) == reading_ids[0], \
-            f"downloaded book {marker.group(1)}, not the first of the filtered listing ({reading_ids[0]})"
+        started = download_start(output)
+        assert started, "the sorted listing's download did not start"
+        marker, book_id, restarted = started
+        assert book_id == reading_ids[0], \
+            f"downloaded book {book_id}, not the first of the filtered listing ({reading_ids[0]})"
         resumed = output[marker.end():]
-        assert re.search(r"Downloading file \d+ -> ", resumed), "the download boot never downloaded the book"
+        assert re.search(r"Downloading file \d+ -> ", resumed), "the book was never downloaded"
+        if not restarted:
+            # Downloaded behind the listing, which stays: no rebuild from the cache to check.
+            assert background_download_done(output, book_id), "the background download did not finish"
+            return
         # The listing the download boot rebuilds: one page, as many rows as the filter
         # keeps, from the cache.
         restored = [(source, int(rows)) for _, source, rows, _ in LISTING_PAGE_LOG.findall(resumed)]
@@ -3017,6 +3162,92 @@ def scenario_book_update_offer(verbose: bool) -> None:
     assert text in texts, f"the highlight was not sent after the update: {texts}"
 
 
+def numbered_copy(source: Path, dest: Path, series: str, number: int) -> None:
+    """A copy of a library book whose OPF numbers it in a series, as Calibre writes it. The
+    server's own copies carry no series: seed.py sets theirs through its API."""
+    dest.parent.mkdir(parents=True, exist_ok=True)
+    meta = (f'<meta name="calibre:series" content="{series}"/>'
+            f'<meta name="calibre:series_index" content="{number}"/></metadata>').encode()
+    with zipfile.ZipFile(source) as src, zipfile.ZipFile(dest, "w") as out:
+        for info in src.infolist():
+            data = src.read(info.filename)
+            if info.filename.endswith(".opf"):
+                data = data.replace(b"</metadata>", meta, 1)
+            out.writestr(info, data, compress_type=info.compress_type)
+
+
+def finish_book(fs: SimFs, sim_path: str, source: Path) -> None:
+    """Asleep on the book's End-of-Book screen: its progress one past the last chapter."""
+    fs.set_asleep_in_book(sim_path)
+    write_progress_bin(fs.epub_cache_dir(sim_path) / "progress.bin", len(epub_spine_entries(source)), 0, 1)
+
+
+def open_book_after(fs: SimFs) -> str:
+    return json.loads((fs.crosspoint / "state.json").read_text()).get("openEpubPath", "")
+
+
+def scenario_series_next_on_card(verbose: bool) -> None:
+    """The End-of-Book screen's first row is the series' next book when the card has it,
+    found through the Library index wherever it is filed, ahead of the book after this one
+    in its folder; Confirm opens it."""
+    manifest, library = load_seed()
+    series = manifest["series"]["name"]
+    with tempfile.TemporaryDirectory(prefix="crossink-integ-") as tmp:
+        fs = SimFs(Path(tmp), manifest["kosync"])
+        first = fs.fs / "books" / "a-first.epub"
+        numbered_copy(INTEGRATION / "library" / library[64]["file"], first, series, 1)
+        numbered_copy(INTEGRATION / "library" / library[65]["file"], fs.fs / "Saga" / "second.epub", series, 2)
+        # Alphabetically next in the first book's folder, which the series row comes before.
+        shutil.copy2(INTEGRATION / "library" / library[66]["file"], fs.fs / "books" / "b-other.epub")
+
+        # Home menu -> Library, whose first open builds the index the lookup reads (in any
+        # order but Recently Read, which needs no index).
+        (fs.crosspoint / "crossink-settings.json").write_text(json.dumps({"librarySortMethod": 1}))
+        run_simulator(fs, input_script="3000:DOWN:120;3600:CONFIRM:120;12000:QUIT", choice="none",
+                      timeout_s=30, verbose=verbose)
+        assert (fs.crosspoint / "library.idx").exists(), "the Library built no index"
+
+        finish_book(fs, "/books/a-first.epub", first)
+        run_simulator(fs, input_script="6000:CONFIRM:120;10000:QUIT", choice="none", timeout_s=30,
+                      verbose=verbose, wake_into_reader=True)
+        assert open_book_after(fs) == "/Saga/second.epub", f"opened {open_book_after(fs)!r}, not the next in series"
+
+
+def scenario_series_next_download(verbose: bool) -> None:
+    """With the series' next book not on the card, the End-of-Book screen offers it from
+    BookOrbit: Confirm looks the series up, downloads the book numbered next and opens it."""
+    manifest, library = load_seed()
+    series = manifest["series"]["name"]
+    sim = KosyncDevice(BASE_URL, manifest["kosync"]["username"], manifest["kosync"]["password"], SIM_DEVICE_ID)
+    next_id = next(item["id"] for item in sim.catalog_manifest()
+                   for f in item["files"] if f["fileHash"] == library[65]["hash"])
+    with tempfile.TemporaryDirectory(prefix="crossink-integ-") as tmp:
+        fs = SimFs(Path(tmp), manifest["kosync"])
+        first = fs.fs / "books" / "a-first.epub"
+        numbered_copy(INTEGRATION / "library" / library[64]["file"], first, series, 1)
+        finish_book(fs, "/books/a-first.epub", first)
+
+        # The download ends in a restart into the reader, which the second script quits.
+        output = run_simulator(fs, input_script="6000:CONFIRM:120", choice="none", timeout_s=90,
+                               verbose=verbose, wake_into_reader=True, after_reboot_script="8000:QUIT")
+        index = {i: p for i, p, _ in read_download_index(fs.fs / DOWNLOAD_INDEX)}
+        assert next_id in index, f"book {next_id} was not downloaded: {index}\n" + "\n".join(
+            line for line in output.splitlines() if "BookOrbit" in line)[-2000:]
+        assert (fs.fs / index[next_id].lstrip("/")).exists(), "the download index points at no file"
+        assert open_book_after(fs) == index[next_id], f"opened {open_book_after(fs)!r}, not the download"
+
+    # After the series' last book, the lookup finds nothing and downloads nothing.
+    with tempfile.TemporaryDirectory(prefix="crossink-integ-") as tmp:
+        fs = SimFs(Path(tmp), manifest["kosync"])
+        last = fs.fs / "books" / "c-last.epub"
+        numbered_copy(INTEGRATION / "library" / library[66]["file"], last, series, 3)
+        finish_book(fs, "/books/c-last.epub", last)
+        output = run_simulator(fs, input_script="6000:CONFIRM:120;12000:QUIT", choice="none", timeout_s=30,
+                               verbose=verbose, wake_into_reader=True)
+        assert f'No book after #3 in series "{series}"' in output, "the lookup did not come back empty"
+        assert "Downloading file" not in output, "a book was downloaded after the series' last"
+
+
 SCENARIOS = {
     "catalog_collections_browse": scenario_catalog_collections_browse,
     "catalog_empty_listing_back": scenario_catalog_empty_listing_back,
@@ -3037,6 +3268,9 @@ SCENARIOS = {
     "sync_progress_push": scenario_sync_progress_push,
     "sleep_sync_push": scenario_sleep_sync_push,
     "sleep_sync_refreshes_home": scenario_sleep_sync_refreshes_home,
+    "sleep_sync_home_before_downloads": scenario_sleep_sync_home_before_downloads,
+    "sleep_sync_without_open_book": scenario_sleep_sync_without_open_book,
+    "sleep_sync_recent_books_unchanged": scenario_sleep_sync_recent_books_unchanged,
     "sleep_sync_failure_keeps_home": scenario_sleep_sync_failure_keeps_home,
     "home_theme_refresh": scenario_home_theme_refresh,
     "home_download_returns_home": scenario_home_download_returns_home,
@@ -3066,6 +3300,8 @@ SCENARIOS = {
     "web_move_keeps_book_state": scenario_web_move_keeps_book_state,
     "book_update_carries_state": scenario_book_update_carries_state,
     "book_update_offer": scenario_book_update_offer,
+    "series_next_on_card": scenario_series_next_on_card,
+    "series_next_download": scenario_series_next_download,
 }
 
 

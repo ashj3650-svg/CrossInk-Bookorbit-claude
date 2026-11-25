@@ -9,11 +9,14 @@ on; for everything inherited from upstream, see the
 
 ### Added
 
+- Next in series at the end of a book: when the book you finished is numbered in a series (as the Library's Series order shows it), the End-of-Book screen first offers the next book of the series. When it is on the card, wherever it is filed, "Next in series: <title>" opens it. When it is not, or the card skips a number, "Get the next in series from BookOrbit" connects, finds the book numbered next in that series on your BookOrbit server, downloads it and opens it (if it is already on the card it just opens). The books after this one in its folder still follow below.
+
 - A Wi-Fi icon next to the battery at the top of Home and the other screens outside the reader while the reader is connected to a network.
 - The file transfer web page is always there while Wi-Fi at Home is connected (X4 Classic, X4 Pro and reTerminal Sticky): open http://crosspoint.local/ or the reader's IP address in a browser, with no File Transfer screen. WebDAV and the Calibre plugin reach the reader the same way. It stops when you open a book or another screen, and while a file arrives the reader stays awake.
 
 ### Changed
 
+- The sleep sync is quicker for your other recent books: a book that neither this reader nor the server moved since its last sync is now checked from its saved position alone, without opening the book.
 - With Wi-Fi at Home on, File Transfer no longer lists Join a Network and Calibre Wireless, which the web page above replaces. Create Hotspot, USB Drive and the Nearby Device entries stay. Turning Wi-Fi at Home off brings them back.
 - Joining a saved Wi-Fi network no longer shows the Wi-Fi networks screen while it scans and connects: the screen you came from stays up, and the Wi-Fi screen appears only when no saved network answers (or when you press Confirm to pick one). A screen opened while Wi-Fi at Home is already connected uses that connection straight away.
 - A BookOrbit Home shelf book that is not on the card downloads in the background while Wi-Fi at Home is connected (X4 Classic, X4 Pro and reTerminal Sticky): a short "Downloading..." notice instead of the downloading screen, then a notice when it is in. The reader stays awake meanwhile, opening a book lets it finish, and sleeping cancels it.
@@ -21,6 +24,8 @@ on; for everything inherited from upstream, see the
 ### Fixed
 
 - Wi-Fi at Home did not connect on the device. It started the radio just as Home lowered the CPU speed for idling, and the speed was raised again in the middle of the join; the radio now always starts at full speed. If your usual network does not answer at the first try, it gets a second try after the scan. The clock is also set from the internet on that connection when it is unknown.
+- The BookOrbit Home's own sync (the BookOrbit tile's "Synced ... ago", reading stats, shelves and Also Reading) did not always happen in the sync behind the sleep screen: it ran last, after Download New Books, so waking the reader while books were still downloading skipped it. It now runs right after the reading positions and before the downloads, and the books a download brings in are then added to New on your reader. The tile counts from when the reader went to sleep, so after a night it reads e.g. "Synced 8 h ago" even though the sync worked.
+- The sync behind the sleep screen did nothing when the last book you opened was not an EPUB, or was no longer on the card. It now still syncs your other recent books, the BookOrbit Home and new-book downloads, when the BookOrbit theme or Download New Books is on.
 - The sync behind the sleep screen skipped a book that had never been synced before (no record of a previous sync, and no date for this reader's position, as when it was opened before the clock was set). Such a book now takes the further of the two positions.
 
 ## [v1.6.1+bookorbit.10] - 2026-11-25

@@ -129,7 +129,8 @@ Turn on **Settings → System → BookOrbit Sync → Sync on Sleep** and the dev
 
 - **Waking the device cancels the sync.** Press Power the way you would to wake it. The sync stops at its next step and the device wakes as usual. Whatever the sync had already sent is kept, and the rest follows on the next sync.
 - **Progress follows the Smart sync rules**, whatever **Sync Behavior** says, because nobody is there to answer the choice screen. When those rules cannot decide (the first sync of a book on this device, or both sides having moved), progress is left alone for your next manual sync. Highlights, bookmarks and reading sessions sync either way.
-- **It is skipped** when no book is open, when no Wi-Fi network is saved, and when the battery is below 10% with no charger connected.
+- **The BookOrbit Home syncs too**, under the BookOrbit theme: right after the reading positions, and before any new-book downloads, the sync refreshes what the BookOrbit tile's **Sync now** brings (stats, shelves, Also Reading). The tile then counts from the moment the device went to sleep.
+- **It is skipped** when no Wi-Fi network is saved, and when the battery is below 10% with no charger connected. With no EPUB open, it still runs for the BookOrbit Home and Download New Books when either is on.
 
 Each sync keeps Wi-Fi on for a few seconds, and longer when no saved network answers, so the option is off by default.
 

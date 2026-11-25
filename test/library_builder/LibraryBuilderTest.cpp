@@ -13,6 +13,7 @@
 #include "LibraryFileTypes.h"
 #include "LibraryIndexFile.h"
 #include "LibraryMetadataCache.h"
+#include "LibrarySeries.h"
 #include "LibrarySort.h"
 #include "LibraryText.h"
 #include "Memory.h"
@@ -382,6 +383,56 @@ TEST_F(LibraryBuilderTest, SeriesSortUsesNumericOrderThenTitleAndPutsMissingNumb
   EXPECT_EQ(pathAt(index, SortOrder::SeriesAsc, 4), "/b.epub");
   EXPECT_EQ(pathAt(index, SortOrder::SeriesAsc, 5), "/a.epub");
   EXPECT_EQ(pathAt(index, SortOrder::SeriesAsc, 6), "/d.epub");
+}
+
+TEST_F(LibraryBuilderTest, NextInSeriesFindsTheFollowingNumberWhereverItIsFiled) {
+  // a.epub: no series. b.epub: Earthsea #1. The rest spread over folders, with a second
+  // copy of #2, an unnumbered Earthsea book, a differently cased spelling for #4, and
+  // another series whose name starts the same.
+  for (const char* path :
+       {"/Saga/two.epub", "/Saga/two-again.epub", "/Later/four.epub", "/Saga/loose.epub", "/Other/one.epub"})
+    fake::add(path);
+  bookMetadata["/b.epub"].series = "Earthsea";
+  bookMetadata["/b.epub"].seriesIndex = "1";
+  bookMetadata["/b.epub"].title = "A Wizard";
+  bookMetadata["/Saga/two.epub"].series = "Earthsea";
+  bookMetadata["/Saga/two.epub"].seriesIndex = "2";
+  bookMetadata["/Saga/two.epub"].title = "The Tombs";
+  bookMetadata["/Saga/two-again.epub"].series = "Earthsea";
+  bookMetadata["/Saga/two-again.epub"].seriesIndex = "2.0";
+  bookMetadata["/Saga/two-again.epub"].title = "The Tombs";
+  bookMetadata["/Later/four.epub"].series = "EARTHSEA";
+  bookMetadata["/Later/four.epub"].seriesIndex = "4";
+  bookMetadata["/Saga/loose.epub"].series = "Earthsea";
+  bookMetadata["/Other/one.epub"].series = "Earthsea Tales";
+  bookMetadata["/Other/one.epub"].seriesIndex = "1";
+  ASSERT_TRUE(buildLibraryIndex("/", stats, true));
+  LibraryIndexFile index;
+  ASSERT_TRUE(index.open(INDEX));
+
+  std::string series;
+  uint32_t position = 0;
+  ASSERT_TRUE(findSeriesOf(index, {clixPathHash("/b.epub", 7), 0}, series, position));
+  EXPECT_EQ(series, "Earthsea");
+  EXPECT_EQ(seriesPositionValue(position), 1.0f);
+
+  SeriesBook next;
+  ASSERT_TRUE(findNextInSeries(index, series, position, "/b.epub", next));
+  EXPECT_EQ(next.title, "The Tombs");
+  EXPECT_EQ(seriesPositionValue(next.position), 2.0f);
+  const std::string second = next.path;
+  EXPECT_TRUE(second == "/Saga/two.epub" || second == "/Saga/two-again.epub") << second;
+
+  // From #2 (either copy), the copies of 2 are passed over to #4, whatever its spelling.
+  ASSERT_TRUE(findNextInSeries(index, "earthsea", parseSeriesPosition("2"), second, next));
+  EXPECT_EQ(next.path, "/Later/four.epub");
+  // After the last number, the unnumbered book and the next series are not "next".
+  EXPECT_FALSE(findNextInSeries(index, "Earthsea", parseSeriesPosition("4"), "/Later/four.epub", next));
+  EXPECT_FALSE(findNextInSeries(index, "Earthsea Tales", parseSeriesPosition("1"), "/Other/one.epub", next));
+  // A book with no series has none to look in.
+  ASSERT_TRUE(findSeriesOf(index, {clixPathHash("/a.epub", 7), 0}, series, position));
+  EXPECT_TRUE(series.empty());
+  EXPECT_FALSE(findNextInSeries(index, "", CLIX_UNKNOWN_SERIES_POSITION, "/a.epub", next));
 }
 
 TEST_F(LibraryBuilderTest, SeriesAndGenreSortByFullFoldedNameWithMissingValuesLast) {

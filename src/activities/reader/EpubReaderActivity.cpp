@@ -3344,6 +3344,9 @@ void EpubReaderActivity::loop() {
       case EndOfBookOptions::Action::GoHome:
         onGoHome();
         return;
+      case EndOfBookOptions::Action::FindNextInSeries:
+        endOfBookOptions->findNextOnBookOrbit();
+        return;
       case EndOfBookOptions::Action::LastPage:
         currentSpineIndex = std::max(epub->getSpineItemsCount() - 1, 0);
         nextPageNumber = 0;
