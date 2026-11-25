@@ -118,6 +118,7 @@ inline esp_sleep_wakeup_cause_t esp_sleep_get_wakeup_cause() { return ESP_SLEEP_
 #include "components/UITheme.h"
 #include "components/icons/tablerFilledIcons.h"
 #include "fontIds.h"
+#include "network/BookOrbitAutoDownload.h"
 #include "network/BookOrbitBackgroundDownloads.h"
 #include "network/HomeWebServer.h"
 #include "network/HomeWifi.h"
@@ -1289,11 +1290,25 @@ constexpr uint16_t SLEEP_SYNC_MIN_BATTERY_PERCENT = 10;
 // debounce, as the watcher samples every 10 ms. Otherwise it takes the device's long press.
 constexpr unsigned long SLEEP_SYNC_SHORT_WAKE_PRESS_MS = 20;
 
+static bool hasSyncableOpenEpub() {
+  const std::string& bookPath = APP_STATE.openEpubPath;
+  return !bookPath.empty() && FsHelpers::hasEpubExtension(bookPath) && Storage.exists(bookPath.c_str());
+}
+
+// What the sleep sync does besides the open book: the BookOrbit Home's own sync, and the
+// new-book downloads. Either one is worth a sleep sync with no EPUB open.
+static bool sleepSyncHasLibraryWork() {
+  if (UITheme::hasBookOrbitHome()) return true;
+#if CROSSINK_APP_SLEEP_AUTO_DOWNLOAD
+  if (BOOKORBIT_STORE.getAutoDownloadNew()) return true;
+#endif
+  return false;
+}
+
 static bool shouldSyncBookOrbitBeforeSleep() {
   if (sleepSyncBoot) return false;
   if (!BOOKORBIT_STORE.getSyncOnSleep() || !BOOKORBIT_STORE.hasCredentials()) return false;
-  const std::string& bookPath = APP_STATE.openEpubPath;
-  if (bookPath.empty() || !FsHelpers::hasEpubExtension(bookPath) || !Storage.exists(bookPath.c_str())) return false;
+  if (!hasSyncableOpenEpub() && !sleepSyncHasLibraryWork()) return false;
   if (WIFI_STORE.getCredentialCount() == 0) return false;
   const uint16_t battery = powerManager.getBatteryPercentage();
   if (battery < SLEEP_SYNC_MIN_BATTERY_PERCENT && !gpio.isUsbConnected()) {
@@ -1335,7 +1350,20 @@ static bool startBookOrbitSleepSync(const uint32_t payload) {
   // time, so the button handling there cannot see a press made meanwhile: this task
   // samples it and remembers the press until the sync reaches a step it can stop at.
   if (!sleepSyncWakeWatcher.start(holdMs, (payload & BOOKORBIT_SLEEP_SYNC_PAYLOAD_POWER_HELD) != 0)) return false;
-  return startGlobalBookOrbitSync(true, 0, true);
+  if (hasSyncableOpenEpub() && startGlobalBookOrbitSync(true, 0, true)) return true;
+  // No EPUB open, or it would not load: the sync skips the book and does the rest.
+  if (!sleepSyncHasLibraryWork()) return false;
+  LOG_INF("SLP", "No EPUB to sync: the sleep sync does the library only");
+  auto syncActivity = makeUniqueNoThrow<BookOrbitSyncActivity>(
+      renderer, mappedInputManager, std::string(), 0, 0, 1, KOReaderPosition{}, std::string(), std::nullopt,
+      /*networkBoot=*/true, CrossPointSettings::ORIENTATION_COUNT, /*sleepSync=*/true);
+  if (!syncActivity) {
+    LOG_ERR("SLP", "OOM: BookOrbit sleep sync activity (free=%u maxAlloc=%u)", ESP.getFreeHeap(),
+            ESP.getMaxAllocHeap());
+    return false;
+  }
+  activityManager.replaceActivity(std::move(syncActivity));
+  return true;
 }
 
 bool sleepSyncWakeRequested() { return sleepSyncWakeWatcher.wakeRequested(); }

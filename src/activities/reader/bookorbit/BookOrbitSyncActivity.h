@@ -103,6 +103,8 @@ class BookOrbitSyncActivity final : public Activity, private BookOrbitSyncReport
   // inside the first loop() and ends in deep sleep. With nobody there to answer the choice
   // screen, progress follows smart sync's rules and is left alone when they cannot
   // decide. Power is the only input: the press that would wake the device cancels it.
+  // An empty epubPath is a sleep sync with no EPUB open: it skips the book and does the
+  // rest (the other recent books, the Home, new-book downloads).
   bool sleepSync = false;
   void runSleepSync();
   // True once the sync has been abandoned for a wake press; the device is rebooting.
@@ -156,6 +158,8 @@ class BookOrbitSyncActivity final : public Activity, private BookOrbitSyncReport
   bool touchOverrideActive = false;
 
   void onWifiSelectionComplete(bool success);
+  // NTP, plus the WallClock correction for the stats queued before it.
+  void syncClock();
   void performSync();
   // The reading stats, then the highlights and bookmarks, on the session performSync()
   // opened. False when a wake press ended the sleep sync on the way.

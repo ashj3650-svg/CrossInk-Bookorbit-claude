@@ -45,7 +45,9 @@ INTEGRATION = ROOT / "test" / "integration"
 sys.path.insert(0, str(INTEGRATION / "seed"))
 from kosync import BASE_URL, AdminClient, KosyncDevice, kodatetime, partial_md5, request_json  # noqa: E402
 
-PROGRAM = ROOT / ".pio" / "build" / "simulator" / "program"
+# CROSSINK_SIM_PROGRAM picks another simulator build, such as x4-classic-simulator's: the
+# PSRAM-board features (recent-book sync, new-book downloads) only exist there.
+PROGRAM = Path(os.environ.get("CROSSINK_SIM_PROGRAM", str(ROOT / ".pio" / "build" / "simulator" / "program")))
 
 # The simulator's fixed fake MAC (simulator package esp_mac.h) drives both the
 # credential obfuscation and the device id the firmware reports to the server.
@@ -849,7 +851,8 @@ HOME_BOOK = struct.Struct("<iIBB46s")
 # book count, then its four books.
 HOME_SHELF_HEAD = struct.Struct("<B20s46sB")
 HOME_SHELF_SIZE = HOME_SHELF_HEAD.size + 4 * HOME_BOOK.size
-HOME_SHELF_KIND = {"discover": 0, "recently_added": 1, "want_to_read": 2, "collection": 3, "smart_scope": 4}
+HOME_SHELF_KIND = {"discover": 0, "recently_added": 1, "want_to_read": 2, "collection": 3, "smart_scope": 4,
+                   "new_on_reader": 5}
 
 
 def home_snapshot_shelves(fs: SimFs) -> list[dict]:
@@ -959,6 +962,100 @@ def scenario_sleep_sync_refreshes_home(verbose: bool) -> None:
             assert "Sleep sync over" in output, "sleep sync never ran to its end"
             refreshed = home_snapshot_header(fs) is not None
             assert refreshed == expected, f"theme {theme}: Home snapshot written={refreshed}, expected={expected}"
+
+
+def sleep_sync_with_bookorbit_home(fs: "SimFs", top_shelf: str | None = None) -> None:
+    """Sync on Sleep on, under the BookOrbit theme."""
+    fs.enable_sync_on_sleep()
+    settings = json.loads((fs.crosspoint / "crossink-settings.json").read_text())
+    settings["uiTheme"] = UI_THEME_BOOKORBIT
+    (fs.crosspoint / "crossink-settings.json").write_text(json.dumps(settings))
+    if top_shelf is not None:
+        bookorbit = json.loads((fs.crosspoint / "bookorbit.json").read_text())
+        bookorbit["homeShelfTop"] = top_shelf
+        (fs.crosspoint / "bookorbit.json").write_text(json.dumps(bookorbit))
+
+
+def scenario_sleep_sync_home_before_downloads(verbose: bool) -> None:
+    """The sleep sync refreshes the Home before it downloads new books, so a long download
+    cannot cost the Home its sync, then lists the downloads on New on your reader.
+    PSRAM boards only (x4-classic-simulator): the C3 simulator has no downloads."""
+    manifest, _ = load_seed()
+    source = INTEGRATION / "library" / manifest["progress"][2]["file"]
+    with tempfile.TemporaryDirectory(prefix="crossink-integ-") as tmp:
+        fs = SimFs(Path(tmp), manifest["kosync"])
+        sleep_sync_with_bookorbit_home(fs, top_shelf=f"{HOME_SHELF_KIND['new_on_reader']}::")
+        bookorbit = json.loads((fs.crosspoint / "bookorbit.json").read_text())
+        # Every book on the server counts as added after the watermark.
+        bookorbit.update({"autoDownloadNew": True, "autoDownloadAfter": 1, "autoDownloadAfterId": 0})
+        (fs.crosspoint / "bookorbit.json").write_text(json.dumps(bookorbit))
+        sim_path = fs.add_book(source)
+        fs.set_open_book(sim_path)
+        write_progress_bin(fs.epub_cache_dir(sim_path) / "progress.bin", 4, 0, 1)
+
+        output = run_simulator(fs, input_script="6000:POWER:120", choice="none", timeout_s=240, verbose=verbose)
+        assert "Sleep sync over" in output, "sleep sync never ran to its end"
+        if "New books:" not in output:
+            raise AssertionError("no new-book downloads: run this one against x4-classic-simulator")
+        home = output.index("Home sync done")
+        assert home < output.index("New books:"), "the Home sync came after the downloads"
+        top, _ = home_snapshot_shelves(fs)
+        assert top["kind"] == HOME_SHELF_KIND["new_on_reader"], f"top shelf is not New on your reader: {top}"
+        assert len(top["ids"]) > 0, "New on your reader does not list the books just downloaded"
+
+
+def scenario_sleep_sync_recent_books_unchanged(verbose: bool) -> None:
+    """The sleep sync's other recent books: the first sleep takes their server positions,
+    the next finds neither side moved and skips opening them, and a book read on here
+    since is sent again. PSRAM boards only (x4-classic-simulator)."""
+    manifest, _ = load_seed()
+    open_book, *others = manifest["progress"][2:5]
+    with tempfile.TemporaryDirectory(prefix="crossink-integ-") as tmp:
+        fs = SimFs(Path(tmp), manifest["kosync"])
+        fs.enable_sync_on_sleep()
+        open_path = fs.add_book(INTEGRATION / "library" / open_book["file"])
+        other_paths = [fs.add_book(INTEGRATION / "library" / book["file"]) for book in others]
+        fs.set_open_book(open_path)
+        write_progress_bin(fs.epub_cache_dir(open_path) / "progress.bin", 4, 0, 1)
+        (fs.crosspoint / "recent.json").write_text(json.dumps(
+            {"books": [{"path": path} for path in [open_path, *other_paths]]}))
+
+        def sleep() -> str:
+            output = run_simulator(fs, input_script="6000:POWER:120", choice="none", timeout_s=90, verbose=verbose)
+            assert "Sleep sync over" in output, "sleep sync never ran to its end"
+            if "Recent books:" not in output:
+                raise AssertionError("no recent-book sync: run this one against x4-classic-simulator")
+            return output
+
+        first = sleep()
+        for path in other_paths:
+            assert f"{path}: took the server position" in first, f"{path} did not take the server position"
+        second = sleep()
+        for path in other_paths:
+            assert f"{path}: neither side moved since the last sync" in second, f"{path} was opened again"
+            assert f"{path}: unchanged" in second, f"{path} did not stay unchanged"
+        # Read on here: the next sleep must send it, not skip it.
+        cache = fs.epub_cache_dir(other_paths[0]) / "progress.bin"
+        spine, page, count = struct.unpack_from("<HHH", cache.read_bytes())
+        write_progress_bin(cache, spine + 1, 0, count)
+        state_copy = fs.state_dir(others[0]["hash"]) / "progress.bin"
+        if state_copy.exists():
+            write_progress_bin(state_copy, spine + 1, 0, count)
+        third = sleep()
+        assert f"{other_paths[0]}: sent this position" in third, "a book read on here was not sent"
+
+
+def scenario_sleep_sync_without_open_book(verbose: bool) -> None:
+    """With no EPUB open, the sleep sync still runs the BookOrbit Home's sync."""
+    manifest, _ = load_seed()
+    with tempfile.TemporaryDirectory(prefix="crossink-integ-") as tmp:
+        fs = SimFs(Path(tmp), manifest["kosync"])
+        sleep_sync_with_bookorbit_home(fs)
+        output = run_simulator(fs, input_script="6000:POWER:120", choice="none", timeout_s=90, verbose=verbose)
+        assert "Restarting into the BookOrbit sleep sync" in output, "sleep did not hand over to the sleep sync"
+        assert "the sleep sync does the library only" in output, "the sleep sync did not run without a book"
+        assert "Home sync done" in output, "the Home was not synced"
+        assert home_snapshot_header(fs) is not None, "no Home snapshot written"
 
 
 def scenario_sleep_sync_failure_keeps_home(verbose: bool) -> None:
@@ -3037,6 +3134,9 @@ SCENARIOS = {
     "sync_progress_push": scenario_sync_progress_push,
     "sleep_sync_push": scenario_sleep_sync_push,
     "sleep_sync_refreshes_home": scenario_sleep_sync_refreshes_home,
+    "sleep_sync_home_before_downloads": scenario_sleep_sync_home_before_downloads,
+    "sleep_sync_without_open_book": scenario_sleep_sync_without_open_book,
+    "sleep_sync_recent_books_unchanged": scenario_sleep_sync_recent_books_unchanged,
     "sleep_sync_failure_keeps_home": scenario_sleep_sync_failure_keeps_home,
     "home_theme_refresh": scenario_home_theme_refresh,
     "home_download_returns_home": scenario_home_download_returns_home,

@@ -355,6 +355,34 @@ bool refresh(const StopCheck shouldStop, const CoverSizes& sizes) {
   return true;
 }
 
+bool refreshNewBooksShelf(const StopCheck shouldStop, const CoverSizes& sizes) {
+  auto snapshot = makeUniqueNoThrow<BookOrbitHomeSnapshot>();
+  if (!snapshot) {
+    LOG_ERR("BookOrbit", "Cannot allocate the Home snapshot (%u bytes)", static_cast<unsigned>(sizeof(*snapshot)));
+    return false;
+  }
+  if (!load(*snapshot)) return false;
+  bool listed = false;
+  for (BookOrbitHomeShelf& shelf : snapshot->shelves) {
+    if (shelf.source.kind != BookOrbitHomeShelfKind::NEW_ON_READER) continue;
+    fillNewBooksShelf(shelf);
+    listed = true;
+  }
+  if (!listed) return true;
+
+  // In place: only the struct changes, the year's minutes after it stay as they are.
+  HalFile file = Storage.open(PATH, O_RDWR);
+  const bool ok = file && file.seekSet(HEADER_SIZE) &&
+                  file.write(reinterpret_cast<const uint8_t*>(snapshot.get()), sizeof(*snapshot)) == sizeof(*snapshot);
+  if (file) file.close();
+  if (!ok) {
+    LOG_ERR("BookOrbit", "Cannot update the Home snapshot's new books");
+    return false;
+  }
+  fetchMissingCovers(*snapshot, shouldStop, sizes);
+  return true;
+}
+
 bool shelvesFollowSettings() {
   auto snapshot = makeUniqueNoThrow<BookOrbitHomeSnapshot>();
   if (!snapshot) {
