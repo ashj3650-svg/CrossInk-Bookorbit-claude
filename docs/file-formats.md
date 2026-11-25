@@ -1088,6 +1088,41 @@ version, or more than 8 books, is ignored.
 | 6 | 2 | Book count, at most 8 |
 | 8 | 56 each | `int32_t` catalog book id, `uint32_t` `BookOrbitDownloadIndex::pathHash` of the book's path on the card, `char[46]` title, NUL-terminated, 2 bytes of padding |
 
+## `/.crosspoint/battery_usage.bin`
+
+### Version 1
+
+Settings > System > Device > Battery Use (`src/util/BatteryUsage.cpp`): the battery level at
+the last sleep, wake or sleep-sync start, and running totals of the percent used and the
+seconds measured while awake, asleep and in sleep syncs. Time on USB, stretches across a lost
+clock (another WallClock era) and stretches over 30 days are not counted. Past 14 days of
+measured time a total is halved, so the figures follow the last two weeks. A file with another
+magic, version or state size is ignored and the totals start over.
+
+| Offset | Size | Field |
+| --- | --- | --- |
+| 0 | 4 | Magic, `0x55425243` |
+| 4 | 2 | Version |
+| 6 | 2 | Size of the state that follows, 56 |
+| 8 | 56 | `BatteryUsageMath::State`: last event, last percent, 2 reserved bytes, last epoch, last era, then the awake, asleep and sync totals (each `uint32_t` seconds, `uint32_t` tenths of a percent, `uint32_t` count), then the last sleep's seconds and tenths used |
+
+## `/.crosspoint/device_pin.bin`
+
+### Version 1
+
+The startup PIN (Settings > System > Device > Device PIN, `src/util/DevicePinStore.cpp`).
+It holds a salted FNV-1a hash of the four digits, not the digits. With the file present and
+valid, every cold boot and every wake from sleep opens on the PIN screen; deleting the file
+turns the lock off, which is also how a forgotten PIN is reset.
+
+| Offset | Size | Field |
+| --- | --- | --- |
+| 0 | 4 | Magic, `0x4E495043` |
+| 4 | 2 | Version |
+| 6 | 2 | Reserved, 0 |
+| 8 | 4 | Salt |
+| 12 | 4 | FNV-1a hash of the salt's four bytes (lowest first), then the four digits as values 0-9 |
+
 ## `/.crosspoint/wallclock.bin`
 
 ### Version 1

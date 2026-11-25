@@ -20,12 +20,16 @@ struct Record {
 };
 static_assert(sizeof(Record) == 16, "device_pin.bin holds a 16-byte record");
 
+// isSet() runs at every boot and on every Settings paint: remember the answer instead of
+// opening the file each time. -1 = not read yet. set() and clear() keep it current.
+int8_t cachedIsSet = -1;
+
 // FNV-1a over the salt and the digits. Four digits are ten thousand combinations, so no
 // hash can make the file itself secret; the salt only stops two devices with the same
 // PIN from showing the same number, and keeps the digits out of a card dump.
 uint32_t hashOf(const uint32_t salt, const uint8_t (&digits)[PIN_LENGTH]) {
   uint32_t hash = 2166136261u;
-  for (int i = 0; i < 4; i++) {
+  for (int i = 0; i < static_cast<int>(sizeof(salt)); i++) {
     hash = (hash ^ static_cast<uint8_t>(salt >> (8 * i))) * 16777619u;
   }
   for (const uint8_t digit : digits) {
@@ -46,8 +50,11 @@ bool load(Record& out) {
 }  // namespace
 
 bool isSet() {
-  Record record;
-  return load(record);
+  if (cachedIsSet < 0) {
+    Record record;
+    cachedIsSet = load(record) ? 1 : 0;
+  }
+  return cachedIsSet == 1;
 }
 
 bool verify(const uint8_t (&digits)[PIN_LENGTH]) {
@@ -58,26 +65,33 @@ bool verify(const uint8_t (&digits)[PIN_LENGTH]) {
 
 bool set(const uint8_t (&digits)[PIN_LENGTH]) {
   Record record;
-  // esp_random() on hardware, and the simulator's shim on the host: the salt only needs
-  // to differ between devices.
-  record.salt = static_cast<uint32_t>(random(0, 0x7FFFFFFF)) ^ (millis() << 1);
+  // Arduino's random() draws from esp_random() on hardware (std::rand() in the
+  // simulator): the salt only needs to differ between devices.
+  record.salt = static_cast<uint32_t>(random(0x7FFFFFFF)) ^ (millis() << 1);
   record.hash = hashOf(record.salt, digits);
   HalFile file;
-  if (!Storage.openFileForWrite("PIN", PATH, file)) return false;
+  if (!Storage.openFileForWrite("PIN", PATH, file)) {
+    LOG_ERR("PIN", "Cannot open the device PIN file for writing");
+    return false;
+  }
   const bool ok = file.write(reinterpret_cast<const uint8_t*>(&record), sizeof(record)) == sizeof(record);
   file.close();
   if (!ok) {
     LOG_ERR("PIN", "Cannot write the device PIN");
     Storage.remove(PATH);
   }
+  // A failed write leaves no PIN behind: the old one went with the truncated file.
+  cachedIsSet = ok ? 1 : 0;
   return ok;
 }
 
 bool clear() {
-  if (!Storage.exists(PATH)) return true;
-  if (Storage.remove(PATH)) return true;
-  LOG_ERR("PIN", "Cannot remove the device PIN");
-  return false;
+  if (Storage.exists(PATH) && !Storage.remove(PATH)) {
+    LOG_ERR("PIN", "Cannot remove the device PIN");
+    return false;
+  }
+  cachedIsSet = 0;
+  return true;
 }
 
 }  // namespace DevicePinStore

@@ -191,6 +191,7 @@ class ActivityManager {
   bool blocksGlobalInput() const;
   bool isHomeActivity() const;
   bool isReaderActivity() const;
+  bool isDeviceLocked() const;
   bool openReaderSettingsForTouchscreenEscapeHatch();
   bool handleHomeButtonBackOrHome();
   bool openReaderMenuFromShortcut();

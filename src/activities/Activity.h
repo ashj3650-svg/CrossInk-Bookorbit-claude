@@ -75,6 +75,9 @@ class Activity {
   // activity owning the open book should be the Home/Reader unwind target.
   virtual bool isBookReaderActivity() const { return false; }
   virtual bool isHomeActivity() const { return false; }
+  // The startup PIN lock (DevicePinActivity). Power can only sleep there, and a sleep
+  // from it keeps the reader-or-Home choice of the wake it interrupted.
+  virtual bool isDeviceLock() const { return false; }
   // The open book uses its vertical swipe actions across the entire page;
   // dialogs and lists retain their normal edge or scroll gestures.
   virtual bool usesFullScreenReaderVerticalSwipes() const { return false; }

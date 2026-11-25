@@ -1102,6 +1102,7 @@ inline std::vector<SettingInfo> buildSystemDeviceSettingsList(const std::vector<
     // which only survives sleep while the power latch is kept engaged.
     addSettingByName(settings, allSettings, StrId::STR_KEEP_CLOCK_IN_SLEEP);
   }
+  settings.push_back(SettingInfo::Action(StrId::STR_DEVICE_PIN, SettingAction::DevicePin));
   settings.push_back(SettingInfo::Action(StrId::STR_BATTERY_USE, SettingAction::BatteryUse));
   return settings;
 }

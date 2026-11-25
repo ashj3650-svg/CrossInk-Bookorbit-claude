@@ -1174,6 +1174,8 @@ bool ActivityManager::requiresExclusiveStorageLoop() const {
 
 bool ActivityManager::blocksGlobalInput() const { return currentActivity && currentActivity->blocksGlobalInput(); }
 
+bool ActivityManager::isDeviceLocked() const { return currentActivity && currentActivity->isDeviceLock(); }
+
 bool ActivityManager::isHomeActivity() const { return currentActivity && currentActivity->name == "Home"; }
 
 bool ActivityManager::isReaderActivity() const {
