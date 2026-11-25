@@ -12,6 +12,7 @@
 #include "BookOrbitDownloadIndex.h"
 #include "network/BookOrbitBookDownload.h"
 #include "network/BookOrbitCatalogClient.h"
+#include "util/BookOrbitNewBooks.h"
 #include "util/CardSpace.h"
 
 namespace {
@@ -141,13 +142,15 @@ BookOrbitAutoDownload::Summary BookOrbitAutoDownload::run(const StopCheck should
       summary.cardFull = true;
       break;
     }
-    const BookOrbitBookDownload::Result result = BookOrbitBookDownload::downloadBook(book.id, path, cancel);
+    std::string title;
+    const BookOrbitBookDownload::Result result = BookOrbitBookDownload::downloadBook(book.id, path, cancel, &title);
     LOG_INF("BOAD", "Book %lld -> %s: result %d", static_cast<long long>(book.id), path.c_str(),
             static_cast<int>(result));
     bool stop = false;
     switch (result) {
       case BookOrbitBookDownload::Result::Downloaded:
         summary.downloaded++;
+        BookOrbitNewBooks::add(book.id, path, title);
         moveWatermark(book);
         break;
       case BookOrbitBookDownload::Result::AlreadyOnCard:

@@ -53,7 +53,8 @@ enum class Result : uint8_t { Downloaded, AlreadyOnCard, NoEpub, Unreachable, No
 
 // The whole of one download, from the book's details: nothing is fetched when the book is
 // already where it belongs (same size), which the index then records. outPath is where it
-// is or would have gone.
-Result downloadBook(int64_t bookId, std::string& outPath, const HttpDownloader::CancelCallback& shouldCancel);
+// is or would have gone; outTitle, when given, the book's title.
+Result downloadBook(int64_t bookId, std::string& outPath, const HttpDownloader::CancelCallback& shouldCancel,
+                    std::string* outTitle = nullptr);
 
 }  // namespace BookOrbitBookDownload

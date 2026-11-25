@@ -282,16 +282,25 @@ void BookOrbitSettingsActivity::handleHomeSelection() {
 
 void BookOrbitSettingsActivity::showShelfSources(const int shelf) {
   if (!optionPopup) return;
-  // The three sources every server has, then the collections and SmartScopes the last
-  // refresh saved, collections first. Pointers into shelfOptions and the translations,
-  // which the popup copies: 268 bytes of stack for the longest list, on the main loop.
-  constexpr int BUILT_IN = static_cast<int>(BookOrbitHomeShelfKind::COLLECTION);
+  // The sources every server has (and the books Download New Books brought in, where it
+  // exists), then the collections and SmartScopes the last refresh saved, collections
+  // first. Pointers into shelfOptions and the translations, which the popup copies: under
+  // 300 bytes of stack for the longest list, on the main loop.
+  static constexpr BookOrbitHomeShelfKind BUILT_IN_KINDS[] = {
+      BookOrbitHomeShelfKind::DISCOVER,
+      BookOrbitHomeShelfKind::RECENTLY_ADDED,
+      BookOrbitHomeShelfKind::WANT_TO_READ,
+#if CROSSINK_APP_SLEEP_AUTO_DOWNLOAD
+      BookOrbitHomeShelfKind::NEW_ON_READER,
+#endif
+  };
+  constexpr int BUILT_IN = static_cast<int>(sizeof(BUILT_IN_KINDS) / sizeof(BUILT_IN_KINDS[0]));
   const char* names[BUILT_IN + BookOrbitHomeStore::MAX_SHELF_OPTIONS];
   const BookOrbitHomeShelfSource& current = BOOKORBIT_STORE.getHomeShelf(shelf);
   int count = 0;
   int currentRow = 0;
   for (; count < BUILT_IN; count++) {
-    const auto kind = static_cast<BookOrbitHomeShelfKind>(count);
+    const BookOrbitHomeShelfKind kind = BUILT_IN_KINDS[count];
     if (current.kind == kind) currentRow = count;
     names[count] = I18N.get(BookOrbitHomeText::shelfKindName(kind));
   }
@@ -304,7 +313,7 @@ void BookOrbitSettingsActivity::showShelfSources(const int shelf) {
                     currentRow, [this, shelf](const int row) {
                       BookOrbitHomeShelfSource source;
                       if (row < BUILT_IN) {
-                        source.kind = static_cast<BookOrbitHomeShelfKind>(row);
+                        source.kind = BUILT_IN_KINDS[row];
                       } else {
                         source = shelfOptions[static_cast<size_t>(row - BUILT_IN)];
                       }
