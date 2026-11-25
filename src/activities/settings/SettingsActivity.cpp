@@ -28,6 +28,7 @@
 #if CROSSINK_SCALABLE_FONTS
 #include "TtfRenderOptionsActivity.h"
 #endif
+#include "CrossPointState.h"
 #include "FrontlightTimePickerActivity.h"
 #include "KOReaderSettingsActivity.h"
 #include "KeyboardLayoutsActivity.h"
@@ -40,6 +41,7 @@
 #include "SettingsList.h"
 #include "SilentRestart.h"
 #include "StatusBarSettingsActivity.h"
+#include "activities/home/AlertActivity.h"
 #include "activities/network/WifiSelectionActivity.h"
 #include "activities/reader/GlobalReadingStats.h"
 #include "activities/util/ConfirmationActivity.h"
@@ -53,6 +55,7 @@
 #include "components/UiAppHelpers.h"
 #include "components/icons/frontlightHeaderIcons.h"
 #include "fontIds.h"
+#include "util/BatteryUsage.h"
 #include "util/DictionaryRegistry.h"
 #include "util/FrontlightSchedule.h"
 
@@ -1267,6 +1270,12 @@ void SettingsActivity::toggleCurrentSetting() {
         break;
       case SettingAction::ClockSync:
         startActivityForResult(std::make_unique<ClockSyncActivity>(renderer, mappedInput), resultHandler);
+        break;
+      case SettingAction::BatteryUse:
+        snprintf(APP_STATE.pendingAlertTitle, sizeof(APP_STATE.pendingAlertTitle), "%s", tr(STR_BATTERY_USE));
+        BatteryUsage::formatReport(APP_STATE.pendingAlertBody, sizeof(APP_STATE.pendingAlertBody));
+        APP_STATE.pendingAlertGoHomeOnBack.store(false, std::memory_order_relaxed);
+        startActivityForResult(std::make_unique<AlertActivity>(renderer, mappedInput), [](const ActivityResult&) {});
         break;
       case SettingAction::QuickActions:
         startActivityForResult(std::make_unique<QuickActionsActivity>(renderer, mappedInput), resultHandler);

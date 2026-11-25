@@ -3,6 +3,9 @@
 #include <GfxRenderer.h>
 #include <I18n.h>
 
+#include <algorithm>
+#include <string>
+
 #include "CrossPointState.h"
 #include "components/UITheme.h"
 #include "fontIds.h"
@@ -41,10 +44,18 @@ void AlertActivity::render(RenderLock&&) {
 
   int y = metrics.topPadding + metrics.headerHeight + metrics.verticalSpacing;
 
-  auto bodyLines = renderer.wrappedText(UI_10_FONT_ID, body.c_str(), contentWidth, 10);
-  for (const auto& line : bodyLines) {
-    renderer.drawText(UI_10_FONT_ID, x, y, line.c_str());
-    y += lineHeight;
+  // '\n' starts a new paragraph, each wrapped on its own, ten lines in all.
+  int linesLeft = 10;
+  size_t start = 0;
+  while (start <= body.size() && linesLeft > 0) {
+    const size_t end = std::min(body.find('\n', start), body.size());
+    const std::string paragraph = body.substr(start, end - start);
+    for (const auto& line : renderer.wrappedText(UI_10_FONT_ID, paragraph.c_str(), contentWidth, linesLeft)) {
+      renderer.drawText(UI_10_FONT_ID, x, y, line.c_str());
+      y += lineHeight;
+      linesLeft--;
+    }
+    start = end + 1;
   }
 
   const auto labels = mappedInput.mapLabels(

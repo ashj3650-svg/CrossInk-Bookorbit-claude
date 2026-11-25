@@ -126,6 +126,7 @@ inline esp_sleep_wakeup_cause_t esp_sleep_get_wakeup_cause() { return ESP_SLEEP_
 #include "simulator/SimulatorSmokeTest.h"
 #endif
 #include "util/BatteryDiagnosticLog.h"
+#include "util/BatteryUsage.h"
 #include "util/BookUpdateMigration.h"
 #include "util/ButtonNavigator.h"
 #include "util/ButtonShortcutController.h"
@@ -1263,6 +1264,8 @@ static void powerDownForDeepSleep() {
   // Last chance to sample: startDeepSleep() cuts the SD rail on X3, so nothing
   // can be written again until the next wake.
   BatteryDiagnosticLog::record(BatteryDiagnosticLog::Event::Sleep, BoardConfig::ACTIVE.name);
+  BatteryUsage::record(BatteryUsage::Event::Sleep, static_cast<uint8_t>(powerManager.getBatteryPercentage()),
+                       gpio.isUsbConnected());
   // All sleep-time file writes are complete. Stop SDMMC before the power path
   // cuts peripheral rails and isolates the bus pads; SPI boards are a no-op.
   libraryScanSleepToken.save(!library::libraryIndexNeedsRefresh());
@@ -1674,6 +1677,19 @@ void setup() {
   // Needs SETTINGS for the clock's UTC offset, so it cannot run any earlier.
   BatteryDiagnosticLog::record(BatteryDiagnosticLog::Event::Wake, BoardConfig::ACTIVE.name,
                                sleepSyncBoot ? "SleepSync" : wakeupRouteName(wakeupReason));
+  // Battery Use: the sleep sync's boot ends the awake stretch and starts its own; a wake
+  // from sleep (or from the sync) ends the stretch before it; a cold boot starts afresh.
+  // Other silent restarts are the same awake stretch going on.
+  {
+    const auto percent = static_cast<uint8_t>(powerManager.getBatteryPercentage());
+    if (sleepSyncBoot) {
+      BatteryUsage::record(BatteryUsage::Event::SyncStart, percent, gpio.isUsbConnected());
+    } else if (isSleepSyncWake || wakeupReason == HalGPIO::WakeupReason::PowerButton) {
+      BatteryUsage::record(BatteryUsage::Event::Wake, percent, gpio.isUsbConnected());
+    } else if (!isSilentReboot) {
+      BatteryUsage::record(BatteryUsage::Event::Wake, percent, gpio.isUsbConnected(), /*count=*/false);
+    }
+  }
   const bool isSleepWake = wakeupReason == HalGPIO::WakeupReason::PowerButton;
   I18N.setLanguage(static_cast<Language>(SETTINGS.language));
   // Normal boot store deferral adapted from Sichroteph/YACP commit
