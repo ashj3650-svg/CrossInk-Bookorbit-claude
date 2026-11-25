@@ -632,9 +632,29 @@ bool JpegToBmpConverter::jpegFileToBmpStreamInternal(FsFile& jpegFile, Print& bm
     return false;
   }
 
-  const int effectiveSrcW = progressive ? (srcWidth + 7) / 8 : srcWidth;
-  const int effectiveSrcH = progressive ? (srcHeight + 7) / 8 : srcHeight;
-  const int decodeFlags = progressive ? JPEG_SCALE_EIGHTH : 0;
+  // Baseline JPEGs much larger than the output decode at a reduced size, which JPEGDEC does
+  // in the transform itself: 1/8 keeps only each block's average (no inverse DCT at all),
+  // 1/2 averages the full decode. A cover thumbnail from a typical 1600x2400 cover then
+  // decodes 200x300 pixels instead of 3.8 million, with smaller row buffers too. The
+  // reduced image is never smaller than the output in either direction, so the scaler
+  // below still only shrinks it, as before. 1/4 is skipped: JPEGDEC fills it from the
+  // block averages alone, which would lose detail a 1/4-size output still shows.
+  int scaleDivisor = progressive ? 8 : 1;
+  if (!progressive && targetWidth > 0 && targetHeight > 0) {
+    if (srcWidth / 8 >= targetWidth && srcHeight / 8 >= targetHeight) {
+      scaleDivisor = 8;
+    } else if (srcWidth / 2 >= targetWidth && srcHeight / 2 >= targetHeight) {
+      scaleDivisor = 2;
+    }
+  }
+  // JPEGDEC rounds scaled dimensions up (iCurW = (width + divisor - 1) >> shift).
+  const int effectiveSrcW = (srcWidth + scaleDivisor - 1) / scaleDivisor;
+  const int effectiveSrcH = (srcHeight + scaleDivisor - 1) / scaleDivisor;
+  const int decodeFlags = scaleDivisor == 8 ? JPEG_SCALE_EIGHTH : (scaleDivisor == 2 ? JPEG_SCALE_HALF : 0);
+  if (scaleDivisor > 1 && !progressive) {
+    LOG_DBG("JPG", "Baseline %dx%d decoded at 1/%d for %dx%d output", srcWidth, srcHeight, scaleDivisor, targetWidth,
+            targetHeight);
+  }
 
   // Calculate output dimensions. Crop mode behaves like CSS object-fit: cover:
   // scale to fill the requested box, then sample a centered source crop before dithering.
