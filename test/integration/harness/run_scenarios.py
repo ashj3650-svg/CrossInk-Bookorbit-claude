@@ -291,6 +291,24 @@ def bookmark_key(datetime: str, pos: str) -> str:
 # rather than from the firmware source, so the scenarios also hold the doc to account.
 DOWNLOAD_INDEX = ".crosspoint/bookorbit_downloads.bin"
 
+# How a catalog download starts depends on the simulator profile: the X3/X4 one (no PSRAM)
+# restarts into a download boot first, the PSRAM ones (x4-classic, x4-pro, sticky) queue
+# the book on a background task and stay where they are.
+DOWNLOAD_START = re.compile(r"Restarting into the download of book (\d+)|\[BOBG\] Book (\d+) queued")
+
+
+def download_start(output: str) -> tuple[re.Match, int, bool] | None:
+    """The first download the run started: its log line, the book id and whether it restarted."""
+    match = DOWNLOAD_START.search(output)
+    if not match:
+        return None
+    restarted = match.group(1) is not None
+    return match, int(match.group(1) or match.group(2)), restarted
+
+
+def background_download_done(output: str, book_id: int) -> bool:
+    return re.search(rf"\[BOBG\] Book {book_id} -> .*: result 0\b", output) is not None
+
 
 def download_index_crc() -> int:
     # The header's CRC32 of the configured server URL, which the firmware keeps verbatim.
@@ -804,10 +822,17 @@ def scenario_home_download_returns_home(verbose: bool) -> None:
         # Library page, then its first stop: the first Discover cover, not on the card yet.
         output = run_simulator(fs, input_script="3000:RIGHT:120;4500:CONFIRM:120", choice="none", timeout_s=60,
                                verbose=verbose)
-        assert "Restarting into the download of book" in output, "the shelf book did not start a download"
+        started = download_start(output)
+        assert started, "the shelf book did not start a download"
+        _, book_id, restarted = started
         downloaded = output.index("Downloading file")
         after = output[downloaded:]
-        assert "Card space read" in after, "Home did not open after the download"
+        if restarted:
+            assert "Card space read" in after, "Home did not open after the download"
+        else:
+            # Downloaded behind Home, which never left.
+            assert background_download_done(output, book_id), "the background download did not finish"
+            assert "Entering activity: BookOrbitCatalogBrowser" not in output, "the download opened the catalog"
         assert "Listing page" not in after, "the download went back to a catalog listing"
         assert not (fs.crosspoint / "bookorbit_download.json").exists(), "the download was left to resume"
 
@@ -2113,13 +2138,19 @@ def scenario_catalog_download_naming(verbose: bool) -> None:
             "24000:QUIT",                                 # only reached if no restart dropped it
         ])
         # The simulator's X4 profile has no PSRAM, so the download restarts into a
-        # boot of its own and the second script drives that boot.
+        # boot of its own and the second script drives that boot; a PSRAM profile
+        # downloads it behind the catalog.
         output = run_simulator(fs, input_script=script, choice="apply", timeout_s=90, verbose=verbose,
                                after_reboot_script="12000:QUIT")
-        assert "Restarting into the download of book" in output, "the download did not restart first"
-        resumed = output.index("Restarting into the download of book")
-        assert "Minimal network boot ready: target=10" in output[resumed:], "no download boot after the restart"
-        assert "Downloading file" in output[resumed:], "the download boot did not run the transfer"
+        started = download_start(output)
+        assert started, "the download did not start"
+        marker, book_id, restarted = started
+        resumed = output[marker.start():]
+        if restarted:
+            assert "Minimal network boot ready: target=10" in resumed, "no download boot after the restart"
+        else:
+            assert background_download_done(output, book_id), "the background download did not finish"
+        assert "Downloading file" in resumed, "the transfer never ran"
         assert not (fs.crosspoint / "bookorbit_download.json").exists(), "the download was left to resume"
 
         # The book that was downloaded is the first row of the listing the browser
@@ -2162,19 +2193,27 @@ def scenario_catalog_download_naming(verbose: bool) -> None:
 
         # Third run: the same file, as another app or a copy over USB would leave it at the
         # template's path, unknown to the index (here a full one of other books), so its row
-        # is not marked. Confirm finds it through the book's details and opens it rather than
-        # downloading it again, and the index records it after the books it already held.
+        # is not marked. Confirm finds it through the book's details and opens it (a PSRAM
+        # profile only marks it) rather than downloading it again, and the index records it
+        # after the books it already held.
         book_path = f"/Downloads/{device_path}"
         others = [(-1 - i, f"/Downloads/Older/Book {i}.epub", 10) for i in range(135)]
         write_download_index(fs.fs / DOWNLOAD_INDEX, others, version=2)
         output = run_simulator(fs, input_script=first_book_script, choice="apply", timeout_s=90,
                                verbose=verbose, after_reboot_script="6000:QUIT")
-        assert "Restarting into the download of book" not in output, "the copy in place downloaded again"
-        assert f"is already at {book_path}, opening it" in output, "Confirm did not find the copy in place"
+        assert "Downloading file" not in output, "the copy in place downloaded again"
+        if restarted:
+            assert f"is already at {book_path}, opening it" in output, "Confirm did not find the copy in place"
+        else:
+            # Behind the listing, the copy in place is taken as it is (result 1: already on
+            # the card) and its row marked, without opening it.
+            assert re.search(rf"\[BOBG\] Book {first['id']} -> {re.escape(book_path)}: result 1\b", output), \
+                "the background download did not take the copy in place"
         assert read_download_index(fs.fs / DOWNLOAD_INDEX) == others + [
             (first["id"], book_path, expected.stat().st_size)], "the index did not record the copy after the others"
-        state = json.loads((fs.crosspoint / "state.json").read_text())
-        assert state.get("openEpubPath") == book_path, "Confirm did not open the copy in place"
+        if restarted:
+            state = json.loads((fs.crosspoint / "state.json").read_text())
+            assert state.get("openEpubPath") == book_path, "Confirm did not open the copy in place"
 
 
 def scenario_catalog_large_local_list(verbose: bool) -> None:
@@ -2354,8 +2393,9 @@ def scenario_catalog_deep_listing(verbose: bool) -> None:
         output = run_simulator(fs, input_script=script, choice="apply", timeout_s=120, verbose=verbose,
                                after_reboot_script=";".join(back + ["32000:QUIT"]))
 
-        marker = re.search(r"Restarting into the download of book (\d+)", output)
-        assert marker, "the deep listing's download did not restart first"
+        started = download_start(output)
+        assert started, "the deep listing's download did not start"
+        marker, book_id, restarted = started
         before, resumed = output[:marker.start()], output[marker.end():]
 
         loads = [(int(p), source, int(rows), int(start)) for p, source, rows, start in LISTING_PAGE_LOG.findall(output)]
@@ -2372,7 +2412,6 @@ def scenario_catalog_deep_listing(verbose: bool) -> None:
         pages = sorted((c for c in caches if "total" in c and "sections" not in c and c.get("total", 0) > 60),
                        key=lambda c: c["page"])
         listing = [item for page in pages for item in page["items"]]
-        book_id = int(marker.group(1))
         row = next((i for i, item in enumerate(listing) if item["id"] == book_id), None)
         assert row is not None and row >= 60, f"the downloaded book {book_id} is not on page 4 or later (row {row})"
 
@@ -2380,6 +2419,10 @@ def scenario_catalog_deep_listing(verbose: bool) -> None:
         # have no author, which leaves an empty folder name the firmware drops).
         landed = re.search(r"Downloading file \d+ -> (\S.*?) \(free=", resumed)
         assert landed and (fs.fs / landed.group(1).lstrip("/")).exists(), "the selected book was not downloaded"
+        if not restarted:
+            # Downloaded behind the listing, which stays as it was: no window to restore.
+            assert background_download_done(output, book_id), "the background download did not finish"
+            return
 
         restored = [(int(p), int(rows), int(start)) for p, _, rows, start in LISTING_PAGE_LOG.findall(resumed)]
         last_restore = max(i for i, (p, _, _) in enumerate(restored) if p == row // 20 + 1)
@@ -2451,12 +2494,17 @@ def scenario_catalog_sort_filter(verbose: bool) -> None:
         assert listings[("recently_added", "reading", "asc")]["total"] == reading["total"], \
             "the filtered listing's total is not the server's"
 
-        marker = re.search(r"Restarting into the download of book (\d+)", output)
-        assert marker, "the sorted listing's download did not restart first"
-        assert int(marker.group(1)) == reading_ids[0], \
-            f"downloaded book {marker.group(1)}, not the first of the filtered listing ({reading_ids[0]})"
+        started = download_start(output)
+        assert started, "the sorted listing's download did not start"
+        marker, book_id, restarted = started
+        assert book_id == reading_ids[0], \
+            f"downloaded book {book_id}, not the first of the filtered listing ({reading_ids[0]})"
         resumed = output[marker.end():]
-        assert re.search(r"Downloading file \d+ -> ", resumed), "the download boot never downloaded the book"
+        assert re.search(r"Downloading file \d+ -> ", resumed), "the book was never downloaded"
+        if not restarted:
+            # Downloaded behind the listing, which stays: no rebuild from the cache to check.
+            assert background_download_done(output, book_id), "the background download did not finish"
+            return
         # The listing the download boot rebuilds: one page, as many rows as the filter
         # keeps, from the cache.
         restored = [(source, int(rows)) for _, source, rows, _ in LISTING_PAGE_LOG.findall(resumed)]
