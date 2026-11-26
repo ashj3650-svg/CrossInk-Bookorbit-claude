@@ -563,6 +563,7 @@ class CarouselCache {
 CarouselCache gCarouselCache;
 }  // namespace
 
+static_assert(BookOrbitHomeUi::MAX_BOOKS <= 8, "bookOrbitThumbsTried holds one bit per BookOrbit Home cover slot");
 static_assert(HomeActivity::kMaxCachedBooks >= LyraCarouselMetrics::values.homeRecentBooksCount,
               "kMaxCachedBooks must cover all carousel slots");
 
@@ -1321,26 +1322,27 @@ void HomeActivity::activateBookOrbitStop(const BookOrbitHomeUi::Stop& stop) {
   }
 }
 
+// Makes one missing cover per call, with no "Loading" popup over the page: the page is
+// already up with a book icon in that slot, and render() calls again after the repaint
+// for the next cover. The current book's cover (slot 0) comes first. A book whose cover
+// can never make a thumbnail is recorded as having none; a cover that fails otherwise is
+// left until the next visit, so it cannot hold Home in a loop. The reader makes the
+// current book's covers while you read (EpubReaderActivity::tickHomeCoverPrep), so on
+// most visits there is nothing to do here.
 void HomeActivity::loadBookOrbitThumbnails() {
   recentsLoading = true;
-  bool showingLoading = false;
-  Rect popupRect;
-  const auto showLoadingProgress = [&](const int value) {
-    if (!showingLoading) {
-      showingLoading = true;
-      popupRect = GUI.drawPopup(renderer, tr(STR_LOADING_POPUP));
-    }
-    GUI.fillPopupProgress(renderer, popupRect, value);
-    renderer.displayBuffer();
-  };
+  bool made = false;
   const int count = std::min(static_cast<int>(recentBooks.size()), BookOrbitHomeUi::MAX_BOOKS);
-  for (int i = 0; i < count; i++) {
+  for (int i = 0; i < count && !made; i++) {
+    const uint8_t bit = static_cast<uint8_t>(1U << i);
+    if (bookOrbitThumbsTried & bit) continue;
+    bookOrbitThumbsTried |= bit;
     RecentBook& book = recentBooks[static_cast<size_t>(i)];
     if (book.coverState == RecentBook::CoverState::Missing || !Storage.exists(book.path.c_str())) continue;
     const Rect slot = bookOrbitUi->coverSlot(i);
     const std::string path = BookOrbitHomeUi::coverPath(book, slot.width, slot.height);
     if (path.empty() || Storage.exists(path.c_str())) continue;
-    showLoadingProgress(100 * i / count);
+    const unsigned long start = millis();
     if (FsHelpers::hasEpubExtension(book.path)) {
       Epub epub(book.path, "/.crosspoint");
       if (!epub.load(true, true, Epub::XLocationLoadMode::Skip)) {
@@ -1348,24 +1350,29 @@ void HomeActivity::loadBookOrbitThumbnails() {
         continue;
       }
       if (!epub.generateAdaptiveThumbBmp(slot.width, slot.height, &renderer, SETTINGS.getReaderFontId()) &&
-          !epub.hasCoverImage()) {
+          !epub.hasDecodableCoverImage()) {
         markCoverMissing(book);
       }
     } else if (FsHelpers::hasXtcExtension(book.path)) {
       Xtc xtc(book.path, "/.crosspoint");
       if (xtc.load()) xtc.generateThumbBmp(static_cast<uint16_t>(slot.width), static_cast<uint16_t>(slot.height));
     }
+    LOG_DBG("HOME", "Cover %d made in %lu ms", i, millis() - start);
+    made = true;
   }
   // Covers a sync fetched but had no heap to decode. Wi-Fi is off here, and nothing but a
-  // thumbnail generation competes for the heap.
-  if (BookOrbitHomeStore::hasPendingCovers()) {
-    showLoadingProgress(100);
+  // thumbnail generation competes for the heap. Tried once per visit.
+  if (!made && !bookOrbitPendingCoversTried && BookOrbitHomeStore::hasPendingCovers()) {
+    bookOrbitPendingCoversTried = true;
     BookOrbitHomeStore::decodePendingCovers(nullptr, BookOrbitHomeLayout::coverSizes(renderer));
+    made = true;
   }
-  recentsLoaded = true;
+  if (!made) recentsLoaded = true;
   recentsLoading = false;
-  // The popup is still in the framebuffer, and BookOrbitHomeUi repaints when it finds that.
-  if (showingLoading) requestUpdate();
+  if (made) {
+    bookOrbitUi->requestRepaint();
+    requestUpdate();
+  }
 }
 
 void HomeActivity::onExit() {

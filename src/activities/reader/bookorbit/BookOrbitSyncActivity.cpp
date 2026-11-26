@@ -48,6 +48,7 @@
 #include "network/BookOrbitAutoDownload.h"
 #include "network/SavedWifiConnect.h"
 #include "util/BookContentId.h"
+#include "util/CardSpace.h"
 #include "util/ProgressSaveTime.h"
 
 // This file mirrors src/activities/reader/KOReaderSyncActivity.cpp; see that file's
@@ -379,6 +380,9 @@ void BookOrbitSyncActivity::runSleepSync() {
   }
 #endif
   if (bookOrbitHome && !sleepSyncWakeRequested()) BookPrep::prepareHomeCovers(renderer, &sleepSyncWakeRequested);
+  // The Home's storage bar: counted here, behind the sleep screen, when books changed or
+  // nothing was kept, so the next wake shows it without reading the card's allocation map.
+  if (bookOrbitHome && !sleepSyncWakeRequested()) CardSpace::countIfUnknown();
   LOG_INF("BookOrbit", "Sleep sync over (state=%d)", static_cast<int>(state));
 #ifdef SIMULATOR
   endSimulatorScenarioIfRequested(static_cast<int>(state));

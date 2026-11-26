@@ -1206,6 +1206,12 @@ bool Epub::hasCoverImage() const {
   return bookMetadataCache && bookMetadataCache->isLoaded() && !bookMetadataCache->coreMetadata.coverItemHref.empty();
 }
 
+bool Epub::hasDecodableCoverImage() const {
+  if (!hasCoverImage()) return false;
+  const std::string& href = bookMetadataCache->coreMetadata.coverItemHref;
+  return FsHelpers::hasJpgExtension(href) || FsHelpers::hasPngExtension(href);
+}
+
 std::string Epub::getCoverBmpPath(bool cropped, bool imageLevels) const {
   const auto coverFileName = std::string("cover") + (cropped ? "_crop" : "") + (imageLevels ? "_absolute" : "");
   return cachePath + "/" + coverFileName + ".bmp";

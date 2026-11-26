@@ -51,6 +51,47 @@ the stem-darkening toggle. Missing families use automatic hinting, grayscale
 output, the default interpreter, and no outline adjustments. The file currently
 keeps at most 24 modified family profiles to bound RAM use while settings are open.
 
+## `/.crosspoint/glyph_cache.bin`
+
+### Version 1
+
+Scalable-font letters (TTF and the built-in outline fonts) kept across deep
+sleep. `HalScalableFont::saveGlyphCache()` writes it just before storage shuts
+down for sleep, when at least 8 letters were drawn since the wake; boot reads it
+back into PSRAM and each face takes its letters when it opens. All fields are
+little-endian.
+
+| Offset | Size | Field |
+| --- | --- | --- |
+| 0 | 4 | Magic `0x434C4743` ("CGLC") |
+| 4 | 4 | Version, `1` |
+| 8 | 4 | Build stamp: FNV-1a of `CROSSINK_VERSION`, build date and time, seeded with the adapter revision |
+| 12 | 4 | Payload bytes (file size minus this 24-byte header) |
+| 16 | 4 | FNV-1a of the payload |
+| 20 | 4 | Record count |
+
+Each record is 20 bytes, followed by its 2-bit pixels when it has them
+(`(width * height + 3) / 4` bytes, packed like the in-memory cache):
+
+| Offset | Size | Field |
+| --- | --- | --- |
+| 0 | 4 | Face fingerprint (`HalScalableFont::fingerprint()`: font content plus render options) |
+| 4 | 4 | Codepoint, or `0x80000000 | glyph ID` for a shaped ligature |
+| 8 | 2 | Advance, 12.4 fixed point |
+| 10 | 2 | Left bearing (signed) |
+| 12 | 2 | Top bearing (signed) |
+| 14 | 1 | Point size |
+| 15 | 1 | Width |
+| 16 | 1 | Height |
+| 17 | 1 | `1` when pixels follow, else `0` (metrics only) |
+| 18 | 2 | Reserved, zero |
+
+The file is capped at 96 KB, filled with each cache set's most recent letter
+first. A file from another build, with a bad checksum or with damaged records is
+ignored and replaced at the next sleep. Temporary (dictionary) faces are never
+saved. Deleting the file only costs the first pages after the next wake their
+redraw.
+
 ## `/.crosspoint/sleep-image-index/<directory-hash>-{bmp,all}.idx`
 
 ### Version 1

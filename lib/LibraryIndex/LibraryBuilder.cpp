@@ -1817,7 +1817,14 @@ namespace {
 std::atomic<bool> indexDirty{true};
 }
 
-void invalidateLibraryIndex() { indexDirty.store(true, std::memory_order_relaxed); }
+std::atomic<uint32_t> cardChanges{0};
+
+void invalidateLibraryIndex() {
+  indexDirty.store(true, std::memory_order_relaxed);
+  cardChanges.fetch_add(1, std::memory_order_relaxed);
+}
+
+uint32_t libraryChangeCount() { return cardChanges.load(std::memory_order_relaxed); }
 
 bool libraryIndexNeedsRefresh() { return indexDirty.load(std::memory_order_relaxed); }
 

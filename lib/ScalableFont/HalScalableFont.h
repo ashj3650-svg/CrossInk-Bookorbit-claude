@@ -63,6 +63,11 @@ class HalScalableFont {
   bool probeGlyph(uint32_t cp, uint8_t points);
   static bool inspectFile(const char* path, Info& info, bool* unavailable = nullptr);
   static uint32_t renderingRevision();
+  // Keeps drawn letters across deep sleep so the first pages after a wake skip
+  // FreeType. Load once storage is ready (faces pick their letters up as they
+  // open); save just before storage shuts down for sleep.
+  static void loadGlyphCache(const char* path);
+  static bool saveGlyphCache(const char* path);
   uint32_t fingerprint() const { return hash_; }
   const EpdFont* atSize(uint8_t points);
 

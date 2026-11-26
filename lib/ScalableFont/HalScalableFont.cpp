@@ -22,9 +22,21 @@ constexpr auto Pool = MemoryPool::Psram;
 // 1 MiB in a warm preview; retain smaller arenas for fragmented PSRAM heaps.
 constexpr size_t WorkspaceOptions[] = {1280 * 1024, 1024 * 1024, 768 * 1024};
 constexpr size_t PixelBytes = 512 * 1024;
-constexpr size_t PixelCacheSlots = 512;
-constexpr size_t MetricCacheSlots = 512;
-constexpr size_t KerningCacheSlots = 512;
+// Two-way tables: a book page plus its four styles needs a few hundred
+// glyphs, which thrashed the old 512-slot direct-mapped tables.
+constexpr size_t CacheWays = 2;
+constexpr size_t PixelCacheSlots = 4096;
+constexpr size_t MetricCacheSlots = 4096;
+constexpr size_t KerningCacheSlots = 2048;
+static_assert((PixelCacheSlots & (PixelCacheSlots - 1)) == 0 && (MetricCacheSlots & (MetricCacheSlots - 1)) == 0 &&
+                  (KerningCacheSlots & (KerningCacheSlots - 1)) == 0,
+              "cache tables index sets with a mask");
+// Drawn letters kept across deep sleep (see docs/file-formats.md).
+constexpr uint32_t SavedGlyphMagic = 0x434C4743u;  // "CGLC"
+constexpr uint32_t SavedGlyphVersion = 1;
+constexpr size_t SavedGlyphMaxBytes = 96 * 1024;
+// Fewer new letters than this are not worth an SD write at sleep.
+constexpr uint32_t SavedGlyphMinNew = 8;
 constexpr uint32_t AdapterRevision = 9;
 constexpr uint32_t SfntChecksumMagic = 0xB1B0AFBAu;
 // Unicode ends at 0x10FFFF, so the high bit safely marks a shaped glyph ID in
@@ -130,6 +142,70 @@ struct KerningEntry {
   int8_t value = 0;
 };
 
+struct SavedGlyphHeader {
+  uint32_t magic;
+  uint32_t version;
+  uint32_t build;
+  uint32_t payloadBytes;
+  uint32_t checksum;
+  uint32_t count;
+};
+static_assert(sizeof(SavedGlyphHeader) == 24, "saved glyph header layout");
+
+struct SavedGlyph {
+  uint32_t fingerprint;
+  uint32_t glyph;
+  uint16_t advanceX;
+  int16_t left;
+  int16_t top;
+  uint8_t points;
+  uint8_t width;
+  uint8_t height;
+  uint8_t hasPixels;
+  uint8_t reserved[2];
+};
+static_assert(sizeof(SavedGlyph) == 20, "saved glyph record layout");
+
+size_t glyphPixelBytes(const uint8_t width, const uint8_t height) { return (size_t(width) * height + 3) / 4; }
+
+uint32_t fnv(uint32_t hash, const uint8_t* bytes, const size_t size) {
+  for (size_t i = 0; i < size; ++i) hash = (hash ^ bytes[i]) * 16777619u;
+  return hash;
+}
+
+// A reflash may change FreeType or the adapter, so saved letters only match
+// the exact build that drew them.
+uint32_t savedGlyphBuild() {
+#ifdef CROSSINK_VERSION
+  static const char stamp[] = CROSSINK_VERSION " " __DATE__ " " __TIME__;
+#else
+  static const char stamp[] = __DATE__ " " __TIME__;
+#endif
+  return fnv(2166136261u ^ AdapterRevision, reinterpret_cast<const uint8_t*>(stamp), sizeof(stamp) - 1);
+}
+
+// First slot of the set a key lives in. Fibonacci hashing spreads neighbouring
+// codepoints, sizes and faces across the table.
+size_t setStart(const uint64_t key, const size_t slots) {
+  return (size_t((key * 0x9E3779B97F4A7C15ull) >> 40) & (slots / CacheWays - 1)) * CacheWays;
+}
+
+// A hit moves to the set's first way, so the second way holds the older entry.
+template <typename Entry, typename Match>
+Entry* findInSet(Entry* set, const Match& match) {
+  if (match(set[0])) return set;
+  if (!match(set[1])) return nullptr;
+  std::swap(set[0], set[1]);
+  return set;
+}
+
+// Makes room in the first way by dropping the set's older entry.
+template <typename Entry>
+Entry& freshInSet(Entry* set) {
+  set[1] = set[0];
+  return set[0];
+}
+
 constexpr size_t PixelTableBytes = alignSize(sizeof(PixelEntry) * PixelCacheSlots, alignof(std::max_align_t));
 constexpr size_t MetricTableBytes = alignSize(sizeof(MetricEntry) * MetricCacheSlots, alignof(std::max_align_t));
 constexpr size_t KerningTableBytes = alignSize(sizeof(KerningEntry) * KerningCacheSlots, alignof(std::max_align_t));
@@ -153,14 +229,131 @@ struct Runtime {
   uint16_t failedMetricHeight = 0;
   uint16_t lastBitmapWidth = 0;
   uint16_t lastBitmapHeight = 0;
+  // Open faces whose letters may be saved at sleep, by content fingerprint.
+  struct LiveFace {
+    uint32_t cacheId = 0;
+    uint32_t fingerprint = 0;
+  };
+  static constexpr size_t MaxLiveFaces = 16;
+  LiveFace liveFaces[MaxLiveFaces]{};
+  // Letters FreeType made this wake; saved ones read back do not count.
+  uint32_t newGlyphs = 0;
+  // Letters read back at boot, waiting for their face to open.
+  HeapByteBuffer saved;
+  size_t savedBytes = 0;
+  uint32_t savedFaces[MaxLiveFaces] = {};
+  size_t savedFaceCount = 0;
+  uint32_t savedFacesImported = 0;
+  static_assert(MaxLiveFaces <= 32, "savedFacesImported is a bitmask");
 
   static uint64_t cacheKey(const uint32_t cacheId, const uint32_t glyphOrCodepoint, const uint8_t points) {
     return (uint64_t(cacheId) << 40) | (uint64_t(points) << 32) | glyphOrCodepoint;
   }
 
-  static size_t cacheIndex(const uint32_t cacheId, const uint32_t glyphOrCodepoint, const uint8_t points,
-                           const size_t slots) {
-    return (glyphOrCodepoint * 31u + points * 7u + cacheId) % slots;
+  // Keys hold the low 24 bits of a face's cache ID.
+  static uint32_t keyFace(const uint64_t key) { return uint32_t(key >> 40); }
+  static uint32_t faceTag(const uint32_t cacheId) { return cacheId & 0xFFFFFFu; }
+
+  const PixelEntry* peekPixels(const uint64_t key) const {
+    const auto* set = pixelEntries + setStart(key, PixelCacheSlots);
+    for (size_t way = 0; way < CacheWays; ++way)
+      if (set[way].key == key) return set + way;
+    return nullptr;
+  }
+
+  // Drops one face's entries. Its pixel bytes return when the arena next fills.
+  void purgeFace(const uint32_t cacheId) {
+    if (!pixelEntries) return;
+    const uint32_t tag = faceTag(cacheId);
+    for (size_t i = 0; i < PixelCacheSlots; ++i)
+      if (pixelEntries[i].key && keyFace(pixelEntries[i].key) == tag) pixelEntries[i] = PixelEntry{};
+    for (size_t i = 0; i < MetricCacheSlots; ++i)
+      if (metricEntries[i].key && keyFace(metricEntries[i].key) == tag) metricEntries[i] = MetricEntry{};
+    for (size_t i = 0; i < KerningCacheSlots; ++i)
+      if (kerningEntries[i].leftKey && keyFace(kerningEntries[i].leftKey) == tag) kerningEntries[i] = KerningEntry{};
+  }
+
+  void rememberFace(const uint32_t cacheId, const uint32_t fingerprint) {
+    LiveFace* empty = nullptr;
+    for (auto& face : liveFaces) {
+      if (face.cacheId == cacheId) {
+        face.fingerprint = fingerprint;
+        return;
+      }
+      if (!face.cacheId && !empty) empty = &face;
+    }
+    if (empty) *empty = {cacheId, fingerprint};
+  }
+
+  void forgetFace(const uint32_t cacheId) {
+    for (auto& face : liveFaces)
+      if (face.cacheId == cacheId) face = {};
+  }
+
+  bool liveFingerprint(const uint32_t tag, uint32_t& fingerprint) const {
+    for (const auto& face : liveFaces) {
+      if (face.cacheId && faceTag(face.cacheId) == tag) {
+        fingerprint = face.fingerprint;
+        return true;
+      }
+    }
+    return false;
+  }
+
+  bool fingerprintIsLive(const uint32_t fingerprint) const {
+    for (const auto& face : liveFaces)
+      if (face.cacheId && face.fingerprint == fingerprint) return true;
+    return false;
+  }
+
+  // Calls visit(record, pixels) for each saved letter; records were bounds
+  // checked when the file was read.
+  template <typename Visit>
+  void forEachSaved(const Visit& visit) const {
+    if (!saved) return;
+    for (size_t at = sizeof(SavedGlyphHeader); at + sizeof(SavedGlyph) <= savedBytes;) {
+      SavedGlyph record;
+      std::memcpy(&record, saved.get() + at, sizeof(record));
+      at += sizeof(record);
+      const size_t bytes = record.hasPixels ? glyphPixelBytes(record.width, record.height) : 0;
+      visit(record, saved.get() + at);
+      at += bytes;
+    }
+  }
+
+  // Puts the saved letters of one just-opened face back in the tables.
+  void importSaved(const uint32_t cacheId, const uint32_t fingerprint) {
+    if (!saved || !pixelEntries) return;
+    size_t face = 0;
+    while (face < savedFaceCount && savedFaces[face] != fingerprint) ++face;
+    if (face == savedFaceCount) return;
+    unsigned metrics = 0;
+    unsigned bitmaps = 0;
+    forEachSaved([&](const SavedGlyph& record, const uint8_t* pixels) {
+      if (record.fingerprint != fingerprint) return;
+      const uint64_t key = cacheKey(cacheId, record.glyph, record.points);
+      const size_t bytes = glyphPixelBytes(record.width, record.height);
+      auto* metricSet = metricEntries + setStart(key, MetricCacheSlots);
+      if (!findInSet(metricSet, [key](const MetricEntry& entry) { return entry.key == key; })) {
+        freshInSet(metricSet) = {
+            key,
+            {record.width, record.height, record.advanceX, record.left, record.top, uint16_t(bytes), record.glyph}};
+        ++metrics;
+      }
+      if (!record.hasPixels || pixelUsed + bytes > PixelBytes) return;
+      auto* pixelSet = pixelEntries + setStart(key, PixelCacheSlots);
+      if (findInSet(pixelSet, [key](const PixelEntry& entry) { return entry.key == key; })) return;
+      std::memcpy(pixelData + pixelUsed, pixels, bytes);
+      freshInSet(pixelSet) = {key, pixelUsed};
+      pixelUsed += bytes;
+      ++bitmaps;
+    });
+    LOG_DBG("TTF", "Restored %u saved letters (%u drawn) for face %08X", metrics, bitmaps, unsigned(fingerprint));
+    savedFacesImported |= 1u << face;
+    if (savedFacesImported == (1u << savedFaceCount) - 1u) {
+      saved.reset();
+      savedBytes = 0;
+    }
   }
 
   void clearPixels() {
@@ -184,9 +377,9 @@ struct Runtime {
   bool glyphMetrics(freeink::font::FtFont& font, const uint32_t cacheId, const uint32_t glyphOrCodepoint,
                     const uint8_t points, EpdGlyph& glyph) {
     const uint64_t key = cacheKey(cacheId, glyphOrCodepoint, points);
-    auto& entry = metricEntries[cacheIndex(cacheId, glyphOrCodepoint, points, MetricCacheSlots)];
-    if (entry.key == key) {
-      glyph = entry.glyph;
+    auto* set = metricEntries + setStart(key, MetricCacheSlots);
+    if (const auto* hit = findInSet(set, [key](const MetricEntry& entry) { return entry.key == key; })) {
+      glyph = hit->glyph;
       return true;
     }
 
@@ -208,7 +401,8 @@ struct Runtime {
              metrics.top,
              uint16_t((unsigned(metrics.width) * metrics.height + 3) / 4),
              glyphOrCodepoint};
-    entry = {key, glyph};
+    freshInSet(set) = {key, glyph};
+    ++newGlyphs;
     return true;
   }
 
@@ -216,20 +410,24 @@ struct Runtime {
                  const uint32_t rightGlyph, const uint8_t points) {
     if (!leftGlyph || !rightGlyph) return 0;
     const uint64_t leftKey = cacheKey(cacheId, leftGlyph, points);
-    auto& entry = kerningEntries[(leftGlyph * 31u + rightGlyph * 17u + points * 7u + cacheId) % KerningCacheSlots];
-    if (entry.leftKey == leftKey && entry.rightGlyph == rightGlyph) return entry.value;
+    auto* set = kerningEntries + setStart(leftKey ^ (uint64_t(rightGlyph) * 0xC2B2AE3D27D4EB4Full), KerningCacheSlots);
+    if (const auto* hit = findInSet(set, [leftKey, rightGlyph](const KerningEntry& entry) {
+          return entry.leftKey == leftKey && entry.rightGlyph == rightGlyph;
+        }))
+      return hit->value;
 
     const auto measured = font.kerningGlyphs26_6(leftGlyph, rightGlyph, scalableFontPixelSize26_6(points));
     const auto value = int8_t(std::clamp<int32_t>(round26_6To16(measured), -128, 127));
-    entry = {leftKey, rightGlyph, value};
+    freshInSet(set) = {leftKey, rightGlyph, value};
     return value;
   }
 
   const uint8_t* packedBitmap(freeink::font::FtFont& font, const uint32_t cacheId, uint32_t glyphOrCodepoint,
                               uint8_t points, uint8_t width, uint8_t height) {
     const uint64_t key = cacheKey(cacheId, glyphOrCodepoint, points);
-    auto& entry = pixelEntries[cacheIndex(cacheId, glyphOrCodepoint, points, PixelCacheSlots)];
-    if (entry.key == key) return pixelData + entry.offset;
+    auto* set = pixelEntries + setStart(key, PixelCacheSlots);
+    if (const auto* hit = findInSet(set, [key](const PixelEntry& entry) { return entry.key == key; }))
+      return pixelData + hit->offset;
 
     allocator.clearFailure();
     const auto* bitmap =
@@ -256,8 +454,9 @@ struct Runtime {
         dest[index / 4] |= coverage << (6 - (index % 4) * 2);
       }
     }
-    entry = {key, pixelUsed};
+    freshInSet(set) = {key, pixelUsed};
     pixelUsed += bytes;
+    ++newGlyphs;
     return dest;
   }
 
@@ -342,12 +541,155 @@ ScalableFontAccess::~ScalableFontAccess() {
 }
 HalScalableFont::~HalScalableFont() {
   ScalableFontAccess access;
-  if (font_.ready() && liveRuntime) liveRuntime->clearCaches();
+  // Other open faces keep their letters; only this face's entries go.
+  if (font_.ready() && liveRuntime) {
+    liveRuntime->purgeFace(cacheId_);
+    liveRuntime->forgetFace(cacheId_);
+  }
   font_.deinit();
   streamFile_.close();
 }
 // Increment the adapter revision when metric/coverage conventions change.
 uint32_t HalScalableFont::renderingRevision() { return AdapterRevision; }
+
+void HalScalableFont::loadGlyphCache(const char* path) {
+  ScalableFontAccess access;
+  auto& rt = runtime();
+  if (rt.saved || !Storage.exists(path)) return;
+  const unsigned long started = millis();
+  HalFile file;
+  if (!Storage.openFileForRead("TTF", path, file)) return;
+  const size_t size = file.size();
+  if (size < sizeof(SavedGlyphHeader) || size > SavedGlyphMaxBytes) {
+    LOG_ERR("TTF", "Ignoring saved letters: size %u", unsigned(size));
+    file.close();
+    return;
+  }
+  auto bytes = makeAlignedByteBufferNoThrow(size, Pool);
+  if (!bytes) {
+    LOG_ERR("TTF", "Cannot allocate %u bytes for saved letters", unsigned(size));
+    file.close();
+    return;
+  }
+  const int got = file.read(bytes.get(), size);
+  file.close();
+  SavedGlyphHeader header;
+  std::memcpy(&header, bytes.get(), sizeof(header));
+  const uint8_t* payload = bytes.get() + sizeof(header);
+  const size_t payloadBytes = size - sizeof(header);
+  if (got < 0 || size_t(got) != size || header.magic != SavedGlyphMagic || header.version != SavedGlyphVersion ||
+      header.build != savedGlyphBuild() || header.payloadBytes != payloadBytes ||
+      header.checksum != fnv(2166136261u, payload, payloadBytes)) {
+    // A new build, a torn write or an old format: start over quietly.
+    LOG_DBG("TTF", "Saved letters do not match this build; ignoring");
+    return;
+  }
+  // Check every record once so imports can trust the bounds.
+  uint32_t faces[Runtime::MaxLiveFaces] = {};
+  size_t faceCount = 0;
+  uint32_t count = 0;
+  size_t at = sizeof(header);
+  while (at + sizeof(SavedGlyph) <= size) {
+    SavedGlyph record;
+    std::memcpy(&record, bytes.get() + at, sizeof(record));
+    const size_t pixels = record.hasPixels ? glyphPixelBytes(record.width, record.height) : 0;
+    if (record.points < MinPointSize || record.points > MaxPointSize || record.hasPixels > 1 ||
+        (record.hasPixels && !pixels) || pixels > size - at - sizeof(record)) {
+      LOG_ERR("TTF", "Saved letters damaged at %u; ignoring", unsigned(at));
+      return;
+    }
+    size_t face = 0;
+    while (face < faceCount && faces[face] != record.fingerprint) ++face;
+    if (face == faceCount) {
+      if (faceCount == Runtime::MaxLiveFaces) {
+        LOG_ERR("TTF", "Saved letters list too many faces; ignoring");
+        return;
+      }
+      faces[faceCount++] = record.fingerprint;
+    }
+    at += sizeof(record) + pixels;
+    ++count;
+  }
+  if (at != size || count != header.count || !count) {
+    LOG_ERR("TTF", "Saved letters damaged; ignoring");
+    return;
+  }
+  rt.saved = std::move(bytes);
+  rt.savedBytes = size;
+  std::memcpy(rt.savedFaces, faces, sizeof(faces));
+  rt.savedFaceCount = faceCount;
+  rt.savedFacesImported = 0;
+  LOG_INF("TTF", "Read %u saved letters for %u faces (%u KB) in %lu ms", unsigned(count), unsigned(faceCount),
+          unsigned((size + 1023) / 1024), millis() - started);
+}
+
+bool HalScalableFont::saveGlyphCache(const char* path) {
+  ScalableFontAccess access;
+  auto& rt = runtime();
+  // No face drew anything new this wake: the file on the card is still right.
+  if (!rt.pixelEntries || rt.newGlyphs < SavedGlyphMinNew) {
+    LOG_DBG("TTF", "Letters unchanged (%u new); not saving", unsigned(rt.newGlyphs));
+    return true;
+  }
+  const unsigned long started = millis();
+  auto out = makeAlignedByteBufferNoThrow(SavedGlyphMaxBytes, Pool);
+  if (!out) {
+    LOG_ERR("TTF", "Cannot allocate %u bytes to save letters", unsigned(SavedGlyphMaxBytes));
+    return false;
+  }
+  size_t used = sizeof(SavedGlyphHeader);
+  uint32_t count = 0;
+  const auto append = [&](const SavedGlyph& record, const uint8_t* pixels) {
+    const size_t bytes = record.hasPixels ? glyphPixelBytes(record.width, record.height) : 0;
+    if (used + sizeof(record) + bytes > SavedGlyphMaxBytes) return;
+    std::memcpy(out.get() + used, &record, sizeof(record));
+    if (bytes) std::memcpy(out.get() + used + sizeof(record), pixels, bytes);
+    used += sizeof(record) + bytes;
+    ++count;
+  };
+  // Each set's first way is its most recent letter, so a full file keeps the
+  // letters the reader used last.
+  for (size_t way = 0; way < CacheWays; ++way) {
+    for (size_t i = way; i < MetricCacheSlots; i += CacheWays) {
+      const auto& entry = rt.metricEntries[i];
+      uint32_t fingerprint = 0;
+      if (!entry.key || !rt.liveFingerprint(Runtime::keyFace(entry.key), fingerprint)) continue;
+      const auto& glyph = entry.glyph;
+      const PixelEntry* pixels = glyph.width && glyph.height ? rt.peekPixels(entry.key) : nullptr;
+      SavedGlyph record{
+          fingerprint, uint32_t(entry.key), glyph.advanceX,          glyph.left, glyph.top, uint8_t(entry.key >> 32),
+          glyph.width, glyph.height,        uint8_t(pixels ? 1 : 0), {}};
+      append(record, pixels ? rt.pixelData + pixels->offset : nullptr);
+    }
+  }
+  // Letters for faces that did not open this wake are still good for later.
+  rt.forEachSaved([&](const SavedGlyph& record, const uint8_t* pixels) {
+    if (!rt.fingerprintIsLive(record.fingerprint)) append(record, pixels);
+  });
+  if (!count) return true;
+  SavedGlyphHeader header{SavedGlyphMagic,
+                          SavedGlyphVersion,
+                          savedGlyphBuild(),
+                          uint32_t(used - sizeof(SavedGlyphHeader)),
+                          fnv(2166136261u, out.get() + sizeof(SavedGlyphHeader), used - sizeof(SavedGlyphHeader)),
+                          count};
+  std::memcpy(out.get(), &header, sizeof(header));
+  HalFile file;
+  if (!Storage.openFileForWrite("TTF", path, file)) {
+    LOG_ERR("TTF", "Cannot open %s to save letters", path);
+    return false;
+  }
+  const size_t written = file.write(out.get(), used);
+  file.close();
+  if (written != used) {
+    LOG_ERR("TTF", "Short write saving letters (%u/%u bytes)", unsigned(written), unsigned(used));
+    Storage.remove(path);
+    return false;
+  }
+  LOG_INF("TTF", "Saved %u letters (%u KB) in %lu ms", unsigned(count), unsigned((used + 1023) / 1024),
+          millis() - started);
+  return true;
+}
 
 bool HalScalableFont::openMemory(const uint8_t* bytes, size_t size) {
   freeink::font::FtFont::RenderOptions options;
@@ -431,13 +773,17 @@ bool HalScalableFont::openSource(const uint8_t* bytes, size_t size, const bool s
   hashOption(options.stemDarkening ? 1u : 0u);
   // Streamed faces skip GPOS: their layout identity must reflect that.
   hashOption(streamed_ ? 1u : 0u);
+  if (!temporary) {
+    runtime().rememberFace(cacheId_, hash_);
+    runtime().importSaved(cacheId_, hash_);
+  }
   return true;
 }
 bool HalScalableFont::setRenderOptions(const freeink::font::FtFont::RenderOptions& options) {
   ScalableFontAccess access;
   if (!font_.ready() || !font_.setRenderOptions(options)) return false;
   renderOptions_ = options;
-  runtime().clearCaches();
+  runtime().purgeFace(cacheId_);
   for (size_t i = 0; i < SizeCount; ++i) {
     sizes_[i].~Size();
     new (sizes_ + i) Size{};
@@ -456,6 +802,13 @@ bool HalScalableFont::setRenderOptions(const freeink::font::FtFont::RenderOption
   hashOption(options.stemDarkening ? 1u : 0u);
   // Streamed faces skip GPOS: their layout identity must reflect that.
   hashOption(streamed_ ? 1u : 0u);
+  // Temporary faces never registered, so this only renames persistent ones.
+  bool live = false;
+  for (const auto& face : runtime().liveFaces) live = live || face.cacheId == cacheId_;
+  if (live) {
+    runtime().rememberFace(cacheId_, hash_);
+    runtime().importSaved(cacheId_, hash_);
+  }
   return true;
 }
 bool HalScalableFont::fileSize(const char* path, size_t& size) {

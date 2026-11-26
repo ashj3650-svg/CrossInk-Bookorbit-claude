@@ -46,28 +46,9 @@ void dropOpenedNewBooks(BookOrbitHomeSnapshot& snapshot) {
 }
 
 // Counting the used space froze Home at every start on slow FAT32 cards (#110), so only
-// exFAT cards get a storage bar (see CardSpace). The card is asked once per boot; every
-// download and file transfer ends in a restart, which renews it.
-void readCardSpace(uint64_t& total, uint64_t& used) {
-  static bool read = false;
-  static uint64_t cachedTotal = 0;
-  static uint64_t cachedUsed = 0;
-  if (!read) {
-    read = true;
-    const unsigned long start = millis();
-#ifndef SIMULATOR
-    // The host storage shim does not expose card capacity.
-    if (CardSpace::isQuickToCount()) {
-      cachedTotal = Storage.totalBytes();
-      cachedUsed = Storage.usedBytes();
-    }
-#endif
-    LOG_DBG("HOME", "Card space read in %lu ms (used=%llu total=%llu)", millis() - start,
-            static_cast<unsigned long long>(cachedUsed), static_cast<unsigned long long>(cachedTotal));
-  }
-  total = cachedTotal;
-  used = cachedUsed;
-}
+// exFAT cards get a storage bar (see CardSpace). The figures are counted once and kept
+// across sleep until books change (CardSpace::usage), so a wake does not count again.
+void readCardSpace(uint64_t& total, uint64_t& used) { CardSpace::usage(total, used); }
 }  // namespace
 
 void BookOrbitHomeModel::load(const BookOrbitHomeSource& source, const bool trackedStats) {
