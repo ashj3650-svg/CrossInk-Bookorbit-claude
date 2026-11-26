@@ -1105,18 +1105,36 @@ Read, 3 collection, 4 SmartScope or 5 New on your reader, and only a collection 
 name (`3:12:Science fiction`, `2::`). The name runs to the end of the string, so it may
 hold colons. A missing or unreadable value falls back to Discover over Recently Added.
 
-Download New Books keeps three more keys there: `autoDownloadNew` (the setting), and the
-newest book the sleep sync has taken so far, `autoDownloadAfter` (when it was added, UTC epoch
-seconds) and `autoDownloadAfterId` (its book id, for books added the same second). Turning the
-setting on sets `autoDownloadAfter` to the current time, or to 0 when the clock cannot be
-trusted, in which case the next sleep sync sets it to the newest book Recently Added lists
-and downloads nothing that time. Missing keys read as off.
+Download Missing Books keeps one more key there: `autoDownloadNew` (the setting). A missing
+key reads as off. Earlier versions also kept `autoDownloadAfter` and `autoDownloadAfterId`
+(a Recently Added watermark); they are ignored now and dropped at the next save.
+
+## `/.crosspoint/bookorbit_auto_download.bin`
+
+### Version 1
+
+The BookOrbit books Download Missing Books has seen on the card
+(`src/network/BookOrbitAutoDownload.cpp`): every book a sleep sync found there (through
+`bookorbit_downloads.bin`) or downloaded. A listed book that is no longer on the card was
+deleted, and is not downloaded again. Turning the setting on removes the file, so the next
+sleep sync brings back every book missing from the card. Rewritten whole through
+`bookorbit_auto_download.tmp` when a pass adds to it. A file with another magic or version,
+another server, or more than 8192 books reads as empty.
+
+| Offset | Size | Field |
+| --- | --- | --- |
+| 0 | 4 | Magic, `0x44414F42` |
+| 4 | 2 | Version |
+| 6 | 2 | Reserved, 0 |
+| 8 | 4 | `BookOrbitDownloadIndex::pathHash` of the server's base URL |
+| 12 | 4 | Book count |
+| 16 | 8 each | `int64_t` catalog book ids, ascending |
 
 ## `/.crosspoint/bookorbit_new_books.bin`
 
 ### Version 1
 
-The books Download New Books brought in that nobody has opened yet, newest first: what a
+The books Download Missing Books brought in that nobody has opened yet, newest first: what a
 Home shelf set to New on your reader lists (`src/util/BookOrbitNewBooks.h`). The sleep sync
 adds each book it downloads, the reader takes a book off as it opens it, and the file is
 removed when the list empties. It is read and rewritten whole; a file with another magic or

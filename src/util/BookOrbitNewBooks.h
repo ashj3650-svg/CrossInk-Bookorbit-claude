@@ -3,7 +3,7 @@
 #include <cstdint>
 #include <string>
 
-// The books Download New Books brought in that have not been opened yet, newest first:
+// The books Download Missing Books brought in that have not been opened yet, newest first:
 // what the BookOrbit Home's "New on your reader" shelf lists. Opening a book takes it off.
 //
 // Backed by /.crosspoint/bookorbit_new_books.bin (see docs/file-formats.md): a few fixed

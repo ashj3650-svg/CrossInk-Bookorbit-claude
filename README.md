@@ -53,7 +53,7 @@ These come with v1.6.1+bookorbit.10 and later. The [changelog](CHANGELOG.md) has
 - **Wi-Fi at Home** — Wi-Fi joins your network while Home shows and goes off in a book, on sleep, or after 10 idle minutes. Settings → System → Wi-Fi at Home.
 - **Sync on open** — opening a book with Wi-Fi at Home connected first fetches its latest BookOrbit position.
 - **Sleep sync for recent books** — the sync behind the sleep screen covers up to 10 recent books, and the most recently saved position wins.
-- **Download New Books** — the sleep sync downloads books newly added to your BookOrbit library (Settings → BookOrbit Sync). The **New on your reader** Home shelf lists the ones you have not opened yet.
+- **Download Missing Books** — the sleep sync downloads every book of your BookOrbit library that is not on the card, newest first (Settings → BookOrbit Sync). A book you delete from the card stays deleted. It stops when the card is nearly full or the battery is below 15%. The **New on your reader** Home shelf lists the newest ones you have not opened yet.
 - **Background catalog downloads** — downloads from the catalog run while you keep browsing.
 
 ### Speed
@@ -140,8 +140,8 @@ Turn on **Settings → System → BookOrbit Sync → Sync on Sleep** and the dev
 
 - **Waking the device cancels the sync.** Press Power the way you would to wake it. The sync stops at its next step and the device wakes as usual. Whatever the sync had already sent is kept, and the rest follows on the next sync.
 - **Progress follows the Smart sync rules**, whatever **Sync Behavior** says, because nobody is there to answer the choice screen. When those rules cannot decide (the first sync of a book on this device, or both sides having moved), progress is left alone for your next manual sync. Highlights, bookmarks and reading sessions sync either way.
-- **The BookOrbit Home syncs too**, under the BookOrbit theme: right after the reading positions, and before any new-book downloads, the sync refreshes what the BookOrbit tile's **Sync now** brings (stats, shelves, Also Reading). The tile then counts from the moment the device went to sleep.
-- **It is skipped** when no Wi-Fi network is saved, and when the battery is below 10% with no charger connected. With no EPUB open, it still runs for the BookOrbit Home and Download New Books when either is on.
+- **The BookOrbit Home syncs too**, under the BookOrbit theme: right after the reading positions, and before any book downloads, the sync refreshes what the BookOrbit tile's **Sync now** brings (stats, shelves, Also Reading). The tile then counts from the moment the device went to sleep.
+- **It is skipped** when no Wi-Fi network is saved, and when the battery is below 10% with no charger connected. With no EPUB open, it still runs for the BookOrbit Home and Download Missing Books when either is on.
 
 Each sync keeps Wi-Fi on for a few seconds, and longer when no saved network answers, so the option is off by default.
 

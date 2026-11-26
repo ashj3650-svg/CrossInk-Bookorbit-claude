@@ -402,8 +402,8 @@ const std::vector<SettingInfo>& getBaseSettingsList() {
         StrId::STR_BOOKORBIT_AUTO_DOWNLOAD, {StrId::STR_STATE_OFF, StrId::STR_STATE_ON},
         [] { return static_cast<uint8_t>(BOOKORBIT_STORE.getAutoDownloadNew()); },
         [](uint8_t v) {
-          // Only a change moves the watermark: saving the web form again must not skip
-          // the books waiting for the next sleep.
+          // Only a change: turning it on forgets the books deleted from the card, which
+          // saving the web form again must not do.
           if ((v != 0) != BOOKORBIT_STORE.getAutoDownloadNew()) BookOrbitAutoDownload::setEnabled(v != 0);
         },
         "boAutoDownload", StrId::STR_BOOKORBIT_SYNC));

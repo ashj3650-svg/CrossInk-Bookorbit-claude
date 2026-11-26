@@ -1310,7 +1310,7 @@ static bool hasSyncableOpenEpub() {
 }
 
 // What the sleep sync does besides the open book: the BookOrbit Home's own sync, and the
-// new-book downloads. Either one is worth a sleep sync with no EPUB open.
+// missing-book downloads. Either one is worth a sleep sync with no EPUB open.
 static bool sleepSyncHasLibraryWork() {
   if (UITheme::hasBookOrbitHome()) return true;
 #if CROSSINK_APP_SLEEP_AUTO_DOWNLOAD

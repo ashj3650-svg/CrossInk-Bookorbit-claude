@@ -502,6 +502,26 @@ HttpDownloader::DownloadError BookOrbitCatalogClient::downloadThumbnail(const in
   return HttpDownloader::downloadToFile(url, destPath, nullptr, nullptr, "", "", std::move(options));
 }
 
+bool BookOrbitCatalogClient::fetchBookIds(const BookOrbitBookQuery& query, const int page, const int size,
+                                          std::vector<int64_t>& outIds, int& outTotal, int& outPageSize) {
+  outTotal = 0;
+  outPageSize = size;
+  if (!BOOKORBIT_STORE.hasCredentials() || !query.shelf.empty()) return false;
+  JsonDocument filter;
+  bookOrbitSetFilter(filter, R"({"total":true,"size":true,"items":[{"id":true}]})");
+  JsonDocument doc;
+  if (!fetchJson(booksUrl(query, page, size), filter, doc)) return false;
+  outTotal = doc["total"] | 0;
+  outPageSize = doc["size"] | size;
+  JsonArrayConst items = doc["items"].as<JsonArrayConst>();
+  outIds.reserve(outIds.size() + items.size());
+  for (JsonObjectConst item : items) {
+    const int64_t id = item["id"] | static_cast<int64_t>(0);
+    if (id > 0) outIds.push_back(id);
+  }
+  return true;
+}
+
 bool BookOrbitCatalogClient::fetchBooks(const BookOrbitBookQuery& query, const int page, BookOrbitBookPage& outPage) {
   outPage = BookOrbitBookPage{};
   if (!BOOKORBIT_STORE.hasCredentials()) return false;

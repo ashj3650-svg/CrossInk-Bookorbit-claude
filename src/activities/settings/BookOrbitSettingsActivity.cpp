@@ -282,7 +282,7 @@ void BookOrbitSettingsActivity::handleHomeSelection() {
 
 void BookOrbitSettingsActivity::showShelfSources(const int shelf) {
   if (!optionPopup) return;
-  // The sources every server has (and the books Download New Books brought in, where it
+  // The sources every server has (and the books Download Missing Books brought in, where it
   // exists), then the collections and SmartScopes the last refresh saved, collections
   // first. Pointers into shelfOptions and the translations, which the popup copies: under
   // 300 bytes of stack for the longest list, on the main loop.

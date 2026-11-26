@@ -11,7 +11,7 @@ enum class BookOrbitHomeShelfKind : uint8_t {
   WANT_TO_READ = 2,    // the dashboard's want-to-read shelf
   COLLECTION = 3,      // one collection, by id
   SMART_SCOPE = 4,     // one SmartScope, by id
-  NEW_ON_READER = 5,   // books Download New Books brought in, not opened yet (no server list)
+  NEW_ON_READER = 5,   // books Download Missing Books brought in, not opened yet (no server list)
 };
 
 constexpr int BOOKORBIT_HOME_SHELF_KIND_COUNT = 6;
