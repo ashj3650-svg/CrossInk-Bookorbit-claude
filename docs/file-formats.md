@@ -924,13 +924,11 @@ A file whose magic or length does not match reads as an empty list.
 Remembers where BookOrbit catalog downloads landed on the SD card, keyed by the
 server's book id, so the catalog can mark a book as already on the device even
 when the download folder setting has since changed or the file was renamed
-through a supported flow. It is also what the catalog's offline "On device"
-category lists, which is how a download stays reachable however deeply the
-server's file naming template filed it, without walking the card. It is a
-best-effort convenience cache: entries are verified on lookup (the file must
-still exist with its recorded size) and dropped when stale, and a missing or
-discarded index costs the marker and the listing entry, leaving the filename
-heuristic and a flat directory scan as fallbacks.
+through a supported flow, however deeply the server's file naming template filed
+it. It is a best-effort convenience cache: entries are verified on lookup (the
+file must still exist with its recorded size) and dropped when stale, and a
+missing or discarded index costs the marker, leaving the filename heuristic as
+the fallback.
 
 Only the fixed-size records are loaded into RAM; each path stays in the file
 and is read back at its recorded offset when needed, and the stored path hash

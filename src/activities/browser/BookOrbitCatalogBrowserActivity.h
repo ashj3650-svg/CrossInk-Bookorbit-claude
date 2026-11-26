@@ -19,43 +19,33 @@ class OptionPopup;
  * Activity for browsing and downloading books from BookOrbit's catalog.
  *
  * Simplified compared to BookOrbit's own KOReader plugin: three navigation levels
- * (root sections -> optional authors/series/collections/libraries/smart-scopes
- * facet list -> a paged book list or a search), with each root section badged
- * with its entry count, the way the plugin badges its Browse tiles. A server book
- * list can be sorted and filtered by read status; the server does both, so paging
- * stays exact. Covers, ratings and read-status editing remain out of scope (see
+ * (root sections -> optional authors/series facet list -> a paged book list),
+ * with each root section badged with its entry count, the way the plugin badges
+ * its Browse tiles. A server book list can be sorted and filtered by read status;
+ * the server does both, so paging stays exact. Covers, ratings and read-status editing remain out of scope (see
  * SCOPE.md discussion for BookOrbit sync).
  */
 class BookOrbitCatalogBrowserActivity final : public Activity {
  public:
   // FINISHING_DOWNLOADS: leaving waits for the background downloads (Back cancels them).
-  enum class BrowserState {
-    CHECK_WIFI,
-    WIFI_SELECTION,
-    LOADING,
-    BROWSING,
-    DOWNLOADING,
-    ERROR,
-    SEARCH_INPUT,
-    FINISHING_DOWNLOADS
-  };
-  enum class EntryType { SECTION, FACET_SECTION, FACET, LOCAL_SECTION, LOCAL_BOOK, SEARCH, BOOK };
+  enum class BrowserState { CHECK_WIFI, WIFI_SELECTION, LOADING, BROWSING, DOWNLOADING, ERROR, FINISHING_DOWNLOADS };
+  enum class EntryType { SECTION, FACET_SECTION, FACET, BOOK };
   // Which listing the BROWSING state currently shows; drives Back navigation.
   enum class NavLevel { Root, FacetList, Books };
 
   struct Entry {
     EntryType type;
     std::string title;
-    std::string subtitle;  // author, for BOOK/LOCAL_BOOK entries
-    // Section id (SECTION/FACET_SECTION/LOCAL_SECTION), facet entry id (FACET), or for a
+    std::string subtitle;  // author, for BOOK entries
+    // Section id (SECTION/FACET_SECTION), facet entry id (FACET), or for a
     // BOOK the list section its listing's sort files it under (its series, the day it was
     // added), empty when that sort has none.
     std::string sectionId;
     std::string seriesId;  // numeric series id, for FACET entries of the series facet
-    std::string path;      // SD path: LOCAL_BOOK entries, and BOOK entries already on the device
+    std::string path;      // SD path: BOOK entries already on the device
     int64_t bookId = 0;
     bool onDevice = false;  // BOOK entries: a matching file already exists on the device (at `path`)
-    uint16_t page = 0;      // listing page the row came from; 0 for the root and In progress
+    uint16_t page = 0;      // listing page the row came from; 0 for the root
     // Length of `title` before its " (count)" badge, 0 when it has none. A listing opened
     // from the row is titled without it: its header counts what the listing holds.
     uint16_t badgeAt = 0;
@@ -108,15 +98,14 @@ class BookOrbitCatalogBrowserActivity final : public Activity {
   PendingDownload pendingDownload;
   ButtonNavigator buttonNavigator;
   BrowserState state = BrowserState::LOADING;
-  // The rows in memory: a whole root or In progress list, or a window of a few
-  // consecutive pages of a book or facet listing, or of the On device list. Every scroll position
-  // (selectorIndex, topIndex) counts rows from the start of the listing, so a page
-  // dropped from the window changes no index; entries[0] is row windowStart.
+  // The rows in memory: the whole root, or a window of a few consecutive pages of a
+  // book or facet listing. Every scroll position (selectorIndex, topIndex) counts rows
+  // from the start of the listing, so a page dropped from the window changes no index;
+  // entries[0] is row windowStart.
   std::vector<Entry> entries;
   int windowStart = 0;
   int selectorIndex = 0;
   NavLevel navLevel = NavLevel::Root;
-  bool consumeConfirm = false;
   // Set once a Confirm hold has opened the book action menu; input is swallowed
   // until Confirm is up again so its release does not also activate the row.
   bool longPressFired = false;
@@ -151,12 +140,6 @@ class BookOrbitCatalogBrowserActivity final : public Activity {
   // Set when the current book list was opened from a facet entry, so Back returns
   // to the facet listing instead of the root.
   bool booksFromFacet = false;
-  // The book list is an on-device one (On device, In progress): no server query behind
-  // it, so nothing to sort or filter.
-  bool listIsLocal = false;
-  // The book list is On device, paged from the files BookOrbitLocalBooks keeps on the card
-  // for it, which go when the listing does.
-  bool onDeviceListing = false;
   // Set while the listing is freed for a download's heap headroom, cleared once a
   // listing loads again. Distinguishes "rebuild the list Back should return to"
   // from a listing that genuinely loaded empty, where Back must navigate up
@@ -171,11 +154,6 @@ class BookOrbitCatalogBrowserActivity final : public Activity {
   // The facet row a book list was opened from, which Back returns to.
   int facetSelectorIndex = 0;
   int facetTopIndex = 0;
-  // Book counts of the on-device root entries, for their badges. On device is counted once
-  // a session (-1 until then, and after a download or deletion changed it); In progress at
-  // each root, and opening it reserves that many rows.
-  int localOnDeviceCount = -1;
-  size_t localInProgressCount = 0;
 
   freeink::ui::GfxRendererTarget uiTarget;  // must precede `app`: the app holds a reference to it
   UiApp app;
@@ -226,7 +204,7 @@ class BookOrbitCatalogBrowserActivity final : public Activity {
   static void onControlEvent(const freeink::ui::ActionEvent& event, void* user);
   void buildListScreen(UiApp::ScreenType& screen);
   void activateSelected();
-  // Opens a server book listing from a root section, a facet entry or a search.
+  // Opens a server book listing from a root section or a facet entry.
   void openBookListing(const BookOrbitBookQuery& query, const std::string& title, bool fromFacet);
   bool listOptionsAvailable() const;
   // The Library's list view setting: Expanded heads the list's sections, as it does there.
@@ -256,12 +234,6 @@ class BookOrbitCatalogBrowserActivity final : public Activity {
   void onWifiSelectionComplete(bool connected);
   void showLoadingBeforeFetch();
   bool loadRoot(bool allowNetwork = true);
-  // By value: callers pass a row's own section id, and the listing it opens replaces that row.
-  void loadLocalBooks(std::string kind);
-  size_t collectInProgressBooks(std::vector<Entry>* sink);
-  void loadOnDeviceBooks();
-  // A page of the On device list, joining the window as a server page would (see PageLoad).
-  bool loadOnDevicePage(int page, PageLoad load);
   bool loadFacetEntries(const std::string& sectionId, const std::string& title, int page,
                         PageLoad load = PageLoad::Open, bool allowNetwork = true);
   bool loadBooks(const BookOrbitBookQuery& query, const std::string& title, int page, bool fromFacet,
@@ -273,7 +245,7 @@ class BookOrbitCatalogBrowserActivity final : public Activity {
   Entry* entryAt(int row);
   bool hasMorePages() const;
   // Empties the rows for a new listing that will hold about `rows`, giving back a
-  // larger block a previous In progress listing left behind.
+  // larger block a previous listing left behind.
   void startListing(size_t rows);
   // Room for `count` blank rows of server page `page`; returns the index of the first.
   size_t placePageRows(PageLoad load, size_t count, uint16_t page);
@@ -297,8 +269,6 @@ class BookOrbitCatalogBrowserActivity final : public Activity {
   // pages in order so row numbers stay exact, then restores the scroll position.
   bool reopenListing(NavLevel level, int lastPage, int wantedSelector, int wantedTop);
   void restoreBookListAfterDownload();
-  void launchSearch();
-  void performSearch(const std::string& query);
   // replacePath: re-download over that existing on-device file instead of the
   // server's path; the old copy is only swapped out once the new one is complete.
   // openExisting: a file already at the server's path with the size of the library's file

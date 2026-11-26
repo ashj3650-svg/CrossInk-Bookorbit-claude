@@ -108,13 +108,10 @@ struct BookOrbitBookPage {
  * -1 = unknown (older server without the dashboard, field absent, or failed fetch).
  */
 struct BookOrbitCatalogCounts {
-  int totalBooks = -1;  // "All Books" and "Recently added" list every EPUB
+  int totalBooks = -1;  // "All Books" lists every EPUB
   int inProgress = -1;  // "Continue reading": EPUBs marked as being read
-  int libraries = -1;
   int authors = -1;
   int series = -1;
-  int collections = -1;
-  int smartScopes = -1;
   // EPUBs on the dashboard's want-to-read shelf (the dozen most recently marked); -1 when
   // the server has no such shelf.
   int wantToRead = -1;

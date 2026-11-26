@@ -399,28 +399,6 @@ void BookOrbitDownloadIndex::record(const int64_t bookId, const std::string& pat
   if (!save(&path, count - 1)) reset();
 }
 
-void BookOrbitDownloadIndex::forEachExisting(void (*visit)(int64_t, const std::string&, void*), void* context) {
-  if (visit == nullptr) return;
-  ensureLoaded();
-  if (count == 0) return;
-  FsFile index;
-  if (!Storage.openFileForRead("BODI", INDEX_PATH, index)) {
-    LOG_ERR("BODI", "Download index missing while listing");
-    return;
-  }
-  std::string path;  // reused: one allocation for the whole listing, not per entry
-  for (size_t i = 0; i < count; i++) {
-    if (!readPath(index, records[i], path)) {
-      LOG_ERR("BODI", "Failed to read download index entry %u", static_cast<unsigned>(i));
-      break;
-    }
-    const uint32_t size = fileSizeOf(path);
-    if (size == 0 || size != records[i].fileSize) continue;
-    visit(records[i].bookId, path, context);
-  }
-  index.close();
-}
-
 bool BookOrbitDownloadIndex::hasPath(const std::string& path) {
   ensureLoaded();
   return findPath(path) != NOT_FOUND;

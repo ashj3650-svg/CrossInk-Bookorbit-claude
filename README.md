@@ -11,8 +11,7 @@ Everything else — fonts, themes, reader features, reading stats, controls, the
 - **BookOrbit progress sync** — sync your reading position with a self-hosted BookOrbit server.
 - **BookOrbit highlight and bookmark sync** — two-way: what you highlight or bookmark on the device appears in the web reader at its exact place in the text, what you add on the web lands in the book, and deletions propagate both ways.
 - **A BookOrbit Home theme** — Home as pages of tiles modeled on BookOrbit's dashboard: the current book, streak, week and yearly goal, the catalog's shelves with their covers, and a year of reading. Opening it never waits on the network: a sync keeps it up to date, and without an account it runs on your own numbers.
-- **BookOrbit catalog browser** — browse your server's library on the device and download EPUBs over WiFi, including by author, series or collection.
-- **Offline shortcuts to your own books** — "On device" and "In progress" categories that open a book directly, without touching the network.
+- **BookOrbit catalog browser** — browse your server's library on the device and download EPUBs over WiFi: Continue Reading, All Books, Series, Authors and Want to Read.
 - **Reading statistics pushed to BookOrbit** — your reading time, streaks and pace on the server's dashboard, fed by the pages you turn on the device.
 - **A working clock on the X4** — the status-bar clock, which upstream can only show on hardware that has a clock chip, plus an opt-in mode that keeps the time running through sleep.
 - **Reading and device extras** — a "Previously..." recap after time away, a pinned Peek Page, a sleep timer counted in chapters, Wi-Fi at Home, a startup PIN lock, Battery Use figures and a Search button on the BookOrbit Home (see [Extras](#extras) below).
@@ -243,15 +242,13 @@ Reach the catalog from **Settings → System → BookOrbit Sync → Browse Catal
 
 The root list contains:
 
-| Entry                                         | What it shows                                                                                                                                       |
-| --------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Recently added / Continue reading / All books | Your server's own sections                                                                                                                          |
-| **Authors** / **Series**                      | Paged lists with a book count per entry; pick one to see its books (series are listed in series order)                                              |
-| **Collections**                               | Your server's collections, with a book count per entry; pick one to see its books                                                                   |
-| **Want to Read**                              | The books you most recently marked as want to read, when your server offers that shelf                                                             |
-| **Search**                                    | Free-text search of your library                                                                                                                    |
-| **On device**                                 | Everything downloaded from the catalog, wherever it was filed, plus every EPUB in the download folder, the SD card root and `/Read` — works offline |
-| **In progress**                               | Recent books you haven't finished yet — works offline                                                                                               |
+| Entry                                | What it shows                                                                                          |
+| ------------------------------------ | ------------------------------------------------------------------------------------------------------ |
+| **Continue Reading** / **All Books** | Your server's own sections                                                                             |
+| **Series** / **Authors**             | Paged lists with a book count per entry; pick one to see its books (series are listed in series order) |
+| **Want to Read**                     | The books you most recently marked as want to read, when your server offers that shelf                 |
+
+Your server's other sections (Recently Added, Libraries, Collections and SmartScopes) are not listed. To find a book by name, use the Search button on the BookOrbit Home; the Library and Browse Files open the books already on the card.
 
 In a server book list, **Confirm** downloads the book into the download folder configured in the BookOrbit settings (the SD card root by default). A download that gets interrupted resumes automatically on retry, and **Back** cancels it. Books already present on the device are marked with a dot at the end of the line, so you can tell at a glance what is worth downloading.
 
@@ -259,7 +256,7 @@ The file is named by **your server's KOReader file naming template** — BookOrb
 
 A book that reached the card some other way, sent by another app or copied over USB, has no dot even when it sits exactly where the template files it: only a book's details say where that is. Confirm finds it there, and when the file has the size of your library's, opens it instead of downloading it again and marks it from then on.
 
-A server book list (a root section, the books of an author, series, collection, library or SmartScope, or search results) can be sorted and filtered, as the Library is sorted:
+A server book list (a root section, or the books of an author or series) can be sorted and filtered, as the Library is sorted:
 
 - **Sort** — date added, title, author (by last name), recently read or series. The first row of the picker flips the direction (A-Z or Z-A); a newly picked order starts in its natural direction, newest first for dates.
 - **Filter** — all books, or only those that are unread, being read or finished on your BookOrbit account. The header then names the filter, and its count is the number of matching books.
@@ -269,8 +266,6 @@ On the X3 and X4, **Left** opens Sort and **Right** opens Filter while **Up** an
 When the Library's **List View** is **Expanded**, a book list is split into sections the way the Library splits its own: by first letter when sorted by title or author (where your server ranks it, by the author's last name), by day when sorted by date added, and by series when sorted by series. The second row of the Sort picker switches the List View between Expanded and Compact without leaving the catalog; it is the Library's setting, so the Library follows.
 
 **Want to Read** lists the books you most recently marked as want to read in BookOrbit: the shelf BookOrbit's own KOReader plugin shows, a dozen books at most, in the order you marked them. It appears after the server's sections when your server offers that shelf. BookOrbit's catalog cannot filter a whole list by that status, so it is a shelf rather than a filter choice.
-
-In **On device** and **In progress**, Confirm opens the book in the reader instead of downloading it. **On device** is sorted by file name on the SD card and read a page at a time, so it lists every book, however many the card holds.
 
 On the X3 and X4, the reader restarts briefly before it opens the catalog and before each download, so the secure connection gets the memory it needs; leaving the catalog restarts it once more. A long listing keeps only the pages around the one on screen in memory and reloads the others from the SD card as you scroll back.
 

@@ -157,24 +157,18 @@ bool loadCatalogCounts(BookOrbitCatalogCounts& outCounts) {
   outCounts = BookOrbitCatalogCounts{};
   outCounts.totalBooks = doc["totalBooks"] | -1;
   outCounts.inProgress = doc["inProgress"] | -1;
-  outCounts.libraries = doc["libraries"] | -1;
   outCounts.authors = doc["authors"] | -1;
   outCounts.series = doc["series"] | -1;
-  outCounts.collections = doc["collections"] | -1;
-  outCounts.smartScopes = doc["smartScopes"] | -1;
   outCounts.wantToRead = doc["wantToRead"] | -1;
   return true;
 }
 
 void saveCatalogCounts(const BookOrbitCatalogCounts& counts) {
   std::string json;
-  json.reserve(176);  // eight keys plus their digits, so the append chain never reallocates
+  json.reserve(112);  // five keys plus their digits, so the append chain never reallocates
   json += "{\"totalBooks\":" + std::to_string(counts.totalBooks) +
-          ",\"inProgress\":" + std::to_string(counts.inProgress) +
-          ",\"libraries\":" + std::to_string(counts.libraries) + ",\"authors\":" + std::to_string(counts.authors) +
-          ",\"series\":" + std::to_string(counts.series) + ",\"collections\":" + std::to_string(counts.collections) +
-          ",\"smartScopes\":" + std::to_string(counts.smartScopes) +
-          ",\"wantToRead\":" + std::to_string(counts.wantToRead) + "}";
+          ",\"inProgress\":" + std::to_string(counts.inProgress) + ",\"authors\":" + std::to_string(counts.authors) +
+          ",\"series\":" + std::to_string(counts.series) + ",\"wantToRead\":" + std::to_string(counts.wantToRead) + "}";
   writeJsonStringFile(cachePathForKey("counts"), json);
 }
 

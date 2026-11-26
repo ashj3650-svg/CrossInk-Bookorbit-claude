@@ -33,11 +33,6 @@ bool lookup(int64_t bookId, std::string& outPath);
 // lookup()'s replacement check; call only after the download fully succeeded.
 void record(int64_t bookId, const std::string& path);
 
-// Visits every recorded download whose file is still there, unchanged. This is what
-// lets the catalog list its own downloads wherever the server's file naming template
-// filed them, without walking the card. visit must not call back into the index.
-void forEachExisting(void (*visit)(int64_t bookId, const std::string& path, void* context), void* context);
-
 // True when some recorded download claims this exact path. Lets a directory scan
 // skip files the index already listed, without a second pass to de-duplicate.
 bool hasPath(const std::string& path);
