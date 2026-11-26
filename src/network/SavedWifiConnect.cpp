@@ -2,6 +2,7 @@
 
 #include <Arduino.h>
 #include <HalPowerManager.h>
+#include <HalStorage.h>
 #include <Logging.h>
 #include <WiFi.h>
 
@@ -21,6 +22,53 @@ constexpr uint32_t MIN_FREE_HEAP_TO_START_WIFI = 60U * 1024U;
 constexpr uint32_t MIN_MAX_ALLOC_TO_START_WIFI = 24U * 1024U;
 constexpr unsigned long SCAN_TIMEOUT_MS = 10000;
 constexpr unsigned long POLL_MS = 50;
+
+// Where the last network joined answered: its router (BSSID) and channel, so the next join
+// goes straight there. One record in /.crosspoint/wifi_fast.bin, read once per boot and
+// written only when it changes.
+constexpr char FAST_JOIN_PATH[] = "/.crosspoint/wifi_fast.bin";
+constexpr uint32_t FAST_JOIN_MAGIC = 0x31484657;  // "WFH1"
+#pragma pack(push, 1)
+struct FastJoin {
+  uint32_t magic = 0;
+  char ssid[33] = {};
+  uint8_t channel = 0;
+  uint8_t bssid[6] = {};
+};
+#pragma pack(pop)
+FastJoin fastJoin;
+bool fastJoinLoaded = false;
+
+void loadFastJoin() {
+  if (fastJoinLoaded) return;
+  fastJoinLoaded = true;
+  HalFile file;
+  if (!Storage.openFileForRead("WIFI", FAST_JOIN_PATH, file)) return;
+  FastJoin read;
+  const bool ok = file.read(reinterpret_cast<uint8_t*>(&read), sizeof(read)) == sizeof(read);
+  file.close();
+  if (ok && read.magic == FAST_JOIN_MAGIC && read.channel >= 1 && read.channel <= 14) {
+    read.ssid[sizeof(read.ssid) - 1] = '\0';
+    fastJoin = read;
+  }
+}
+
+void saveFastJoin() {
+  HalFile file;
+  if (!Storage.openFileForWrite("WIFI", FAST_JOIN_PATH, file)) {
+    LOG_ERR("WIFI", "Cannot save the fast-join record");
+    return;
+  }
+  if (file.write(reinterpret_cast<const uint8_t*>(&fastJoin), sizeof(fastJoin)) != sizeof(fastJoin)) {
+    LOG_ERR("WIFI", "Cannot write the fast-join record");
+  }
+  file.close();
+}
+
+bool hasFastJoin(const std::string& ssid) {
+  loadFastJoin();
+  return fastJoin.magic == FAST_JOIN_MAGIC && ssid == fastJoin.ssid;
+}
 
 bool join(const WifiCredential& credential, const SavedWifiConnect::StopCheck shouldStop) {
   SavedWifiConnect::beginJoin(credential);
@@ -106,6 +154,9 @@ bool SavedWifiConnect::connect(const StopCheck shouldStop) {
   if (!lastSsid.empty()) {
     const auto credential = WIFI_STORE.findCredential(lastSsid);
     if (credential && join(*credential, shouldStop)) return true;
+    // A direct join that failed (the router changed channel, or another one of the same
+    // network is nearer) gets one try the usual way before the scan for the others.
+    if (credential && !shouldStop() && dropFastJoin(lastSsid) && join(*credential, shouldStop)) return true;
   }
   if (shouldStop()) return false;
 
@@ -155,13 +206,29 @@ void SavedWifiConnect::beginJoin(const WifiCredential& credential) {
     LOG_DBG("WIFI", "Disconnect before begin timed out; continuing with begin");
   }
   delay(100);
+  const char* password = credential.password.empty() ? nullptr : credential.password.c_str();
+  if (hasFastJoin(credential.ssid)) {
+    LOG_INF("WIFI", "Joining %s directly on channel %u", credential.ssid.c_str(),
+            static_cast<unsigned>(fastJoin.channel));
+    WiFi.setScanMethod(WIFI_FAST_SCAN);
+#ifdef SIMULATOR
+    WiFi.begin(credential.ssid.c_str(), password);  // the simulator's stub has no channel/BSSID join
+#else
+    WiFi.begin(credential.ssid.c_str(), password, fastJoin.channel, fastJoin.bssid);
+#endif
+    return;
+  }
   WiFi.setScanMethod(WIFI_ALL_CHANNEL_SCAN);
   WiFi.setSortMethod(WIFI_CONNECT_AP_BY_SIGNAL);
-  if (credential.password.empty()) {
-    WiFi.begin(credential.ssid.c_str());
-  } else {
-    WiFi.begin(credential.ssid.c_str(), credential.password.c_str());
-  }
+  WiFi.begin(credential.ssid.c_str(), password);
+}
+
+bool SavedWifiConnect::dropFastJoin(const std::string& ssid) {
+  if (!hasFastJoin(ssid)) return false;
+  LOG_INF("WIFI", "Direct join to %s failed; scanning next time", ssid.c_str());
+  fastJoin = FastJoin{};
+  Storage.remove(FAST_JOIN_PATH);
+  return true;
 }
 
 bool SavedWifiConnect::isJoinFailure(const int status) {
@@ -176,6 +243,19 @@ bool SavedWifiConnect::isJoinFailure(const int status) {
 void SavedWifiConnect::rememberJoined(const std::string& ssid) {
   LOG_INF("WIFI", "Joined %s (rssi=%d)", ssid.c_str(), WiFi.RSSI());
   WIFI_STORE.setLastConnectedSsid(ssid);
+  const uint8_t* bssid = WiFi.BSSID();
+  const int32_t channel = WiFi.channel();
+  if (bssid == nullptr || channel < 1 || channel > 14 || ssid.size() >= sizeof(fastJoin.ssid)) return;
+  loadFastJoin();
+  if (hasFastJoin(ssid) && fastJoin.channel == channel && memcmp(fastJoin.bssid, bssid, sizeof(fastJoin.bssid)) == 0) {
+    return;
+  }
+  fastJoin = FastJoin{};
+  fastJoin.magic = FAST_JOIN_MAGIC;
+  memcpy(fastJoin.ssid, ssid.c_str(), ssid.size());
+  fastJoin.channel = static_cast<uint8_t>(channel);
+  memcpy(fastJoin.bssid, bssid, sizeof(fastJoin.bssid));
+  saveFastJoin();
 }
 
 void SavedWifiConnect::disconnect() {

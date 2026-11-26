@@ -238,6 +238,8 @@ void tickOnHome(const unsigned long idleMs) {
       }
       if (SavedWifiConnect::isJoinFailure(status) || now - stateSince >= JOIN_TIMEOUT_MS) {
         LOG_INF("HWIFI", "Could not join %s (status=%d)", candidates[nextCandidate - 1].c_str(), status);
+        // A direct join on the remembered router and channel gets one more try with a scan.
+        if (SavedWifiConnect::dropFastJoin(candidates[nextCandidate - 1])) nextCandidate--;
         if (!joinNextCandidate()) onCandidatesExhausted();
       }
       break;

@@ -149,8 +149,8 @@ BookOrbitAutoDownload::Summary BookOrbitAutoDownload::run(const StopCheck should
     bool stop = false;
     switch (result) {
       case BookOrbitBookDownload::Result::Downloaded:
-        summary.downloaded++;
         BookOrbitNewBooks::add(book.id, path, title);
+        summary.paths[summary.downloaded++] = path;
         moveWatermark(book);
         break;
       case BookOrbitBookDownload::Result::AlreadyOnCard:

@@ -40,7 +40,7 @@ _Screenshots taken in the simulator, with public-domain books from [Standard Ebo
 
 ## Extras
 
-These come with v1.6.1+bookorbit.10. The [changelog](CHANGELOG.md) has the details of each.
+These come with v1.6.1+bookorbit.10 and later. The [changelog](CHANGELOG.md) has the details of each.
 
 ### Reading
 
@@ -55,6 +55,17 @@ These come with v1.6.1+bookorbit.10. The [changelog](CHANGELOG.md) has the detai
 - **Sleep sync for recent books** — the sync behind the sleep screen covers up to 10 recent books, and the most recently saved position wins.
 - **Download New Books** — the sleep sync downloads books newly added to your BookOrbit library (Settings → BookOrbit Sync). The **New on your reader** Home shelf lists the ones you have not opened yet.
 - **Background catalog downloads** — downloads from the catalog run while you keep browsing.
+
+### Speed
+
+Index ahead, Next page ready and covers from memory need the extra memory of the X4 Classic, X4 Pro and reTerminal Sticky; the rest works on every device.
+
+- **Index ahead** — while you read, the next three chapters are laid out in the background, so new chapters open without "Indexing".
+- **Next page ready** — the next page is read and its letters prepared while you read the current one.
+- **Work done while asleep** — after the sleep sync, the Library list, newly downloaded books and Home covers are made ready, so those screens open without waiting.
+- **Covers from memory** — the BookOrbit Home keeps the covers it drew in PSRAM until you open a book.
+- **Faster covers and Wi-Fi** — covers decode at a reduced size for thumbnails, and Wi-Fi joins your router directly instead of scanning every channel.
+- **Performance Mode** — Settings → System → Performance Mode (on by default) keeps full CPU speed and quick button checks while the reader is on; turn it off for longer battery life.
 
 ### Device
 

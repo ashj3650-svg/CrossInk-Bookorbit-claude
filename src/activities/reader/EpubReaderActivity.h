@@ -166,6 +166,28 @@ class EpubReaderActivity final : public Activity {
   int idlePrewarmSpine = -1;
   int idlePrewarmPage = -1;
   int idlePrewarmFontId = 0;
+  // Next page ready (PSRAM boards): the page after the current one, read from the section
+  // cache with its glyphs prepared while the reader idles (idlePrewarmNextPage), so a
+  // forward turn only draws it. Keyed to the section, page and layout it was read for.
+  std::unique_ptr<Page> preloadedPage;
+  const Section* preloadedSection = nullptr;
+  int preloadedSpine = -1;
+  int preloadedPageIndex = -1;
+  uint16_t preloadedPageCount = 0;
+  uint32_t preloadedLayoutSignature = 0;
+  std::unique_ptr<Page> takePreloadedPage(int pageIndex);
+  // Index ahead (PSRAM boards): the next INDEX_AHEAD_CHAPTERS chapters are laid out in small
+  // steps from loop() while the reader idles on a page, so reaching them needs no Indexing.
+  static constexpr int INDEX_AHEAD_CHAPTERS = 3;
+  static constexpr unsigned long INDEX_AHEAD_IDLE_MS = 1500UL;
+  std::unique_ptr<Section> aheadSection;
+  int aheadSpine = -1;      // the spine aheadSection builds
+  int aheadBaseSpine = -1;  // the reader's spine when the chapters ahead were last surveyed
+  int aheadNextSpine = -1;  // the next spine to check or build
+  uint32_t aheadSignature = 0;
+  bool aheadStopped = false;  // a failed or mismatched build: nothing more for this chapter
+  void tickIndexAhead();
+  void stopIndexAhead();
   bool paceSampleWarmupPending = true;
   uint32_t sessionPaceSampleSeconds = 0;
   uint16_t sessionPaceSampleCount = 0;
@@ -594,7 +616,7 @@ class EpubReaderActivity final : public Activity {
   bool backgroundSectionBuildHasHeap();
   void idlePrewarmNextPage();
   bool skipLoopDelay() override {
-    return sectionBuildWantsTick() && !backgroundBuildPausedForLowMemory &&
+    return (sectionBuildWantsTick() || aheadSection) && !backgroundBuildPausedForLowMemory &&
            !backgroundBuildYieldForInput.load(std::memory_order_relaxed);
   }
   bool isReaderActivity() const override { return true; }

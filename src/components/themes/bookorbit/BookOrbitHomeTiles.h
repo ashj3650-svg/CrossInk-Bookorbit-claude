@@ -40,6 +40,13 @@ class BookOrbitHomeTiles {
   void drawCover(const RecentBook& book, const Rect& slot, bool onBlack) const;
   void drawCoverFile(const char* path, const Rect& slot, bool onBlack) const;
 
+  // Frees the PSRAM snapshots of covers already drawn (see drawCoverFile). Opening a book
+  // calls it; the next Home draws its covers from the card again.
+  static void releaseCoverCache();
+
  private:
+  void rememberCover(const char* path, const Rect& slot, const Rect& fitted, uint8_t orientation, bool onBlack,
+                     bool inverted) const;
+
   GfxRenderer& renderer;
 };

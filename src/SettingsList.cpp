@@ -277,6 +277,8 @@ const std::vector<SettingInfo>& getBaseSettingsList() {
     add(SettingInfo::Toggle(StrId::STR_WIFI_AT_HOME, &CrossPointSettings::wifiAtHome, "wifiAtHome",
                             StrId::STR_CAT_SYSTEM));
 #endif
+    add(SettingInfo::Toggle(StrId::STR_PERFORMANCE_MODE, &CrossPointSettings::performanceMode, "performanceMode",
+                            StrId::STR_CAT_SYSTEM));
     add(SettingInfo::Toggle(StrId::STR_OTA_INCLUDE_PRERELEASES, &CrossPointSettings::otaIncludePrereleases,
                             "otaIncludePrereleases", StrId::STR_CAT_SYSTEM));
 

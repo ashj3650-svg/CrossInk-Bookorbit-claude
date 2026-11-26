@@ -22,11 +22,18 @@ void disconnect();
 
 // Brings the radio up in station mode, refusing on a heap too low to start the driver.
 bool startStation();
-// Starts joining one saved network and returns at once; poll WiFi.status().
+// Starts joining one saved network and returns at once; poll WiFi.status(). The network
+// joined last is joined directly on the router and channel it answered on, which skips the
+// scan of every channel (a second or two); a failed direct join falls back to the scan on
+// the next try (dropFastJoin).
 void beginJoin(const WifiCredential& credential);
 // A status that means this join will not succeed.
 bool isJoinFailure(int status);
-// After a join: the network that answered is the first one tried next time.
+// After a join: the network that answered is the first one tried next time, on the same
+// router and channel (see beginJoin).
 void rememberJoined(const std::string& ssid);
+// After a failed join: the next one to this network scans every channel again. Returns
+// whether that join was a direct one, worth a second, scanning try.
+bool dropFastJoin(const std::string& ssid);
 
 }  // namespace SavedWifiConnect
