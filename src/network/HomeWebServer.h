@@ -2,7 +2,7 @@
 
 #include "network/HomeWifi.h"
 
-// The file transfer web page (http://<IP>/ and http://crosspoint.local/, WebDAV, and the
+// The file transfer web page (http://<IP>/ and http://ashadsbook.local/, WebDAV, and the
 // Calibre plugin's discovery) served in the background while Wi-Fi at Home is connected,
 // with no File Transfer screen. HomeWifi starts and stops it with its connection; it runs
 // only while Home is showing.

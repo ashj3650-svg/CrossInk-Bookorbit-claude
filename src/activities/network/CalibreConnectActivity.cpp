@@ -14,9 +14,10 @@
 #include "components/CompactHeader.h"
 #include "components/UITheme.h"
 #include "fontIds.h"
+#include "network/WifiUtils.h"
 
 namespace {
-constexpr const char* HOSTNAME = "crosspoint";
+constexpr const char* HOSTNAME = DEVICE_MDNS_NAME;
 }  // namespace
 
 void CalibreConnectActivity::onEnter() {

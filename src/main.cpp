@@ -72,6 +72,10 @@ inline esp_sleep_wakeup_cause_t esp_sleep_get_wakeup_cause() { return ESP_SLEEP_
 #include <esp_system.h>
 #endif
 
+#if CROSSINK_SCALABLE_FONTS
+#include <HalScalableFont.h>
+#endif
+
 #include <algorithm>
 #include <array>
 #include <cstring>
@@ -134,6 +138,7 @@ inline esp_sleep_wakeup_cause_t esp_sleep_get_wakeup_cause() { return ESP_SLEEP_
 #include "util/BookUpdateMigration.h"
 #include "util/ButtonNavigator.h"
 #include "util/ButtonShortcutController.h"
+#include "util/CardSpace.h"
 #include "util/DevicePinStore.h"
 #include "util/Dictionary.h"
 #include "util/DictionaryRegistry.h"
@@ -1265,15 +1270,24 @@ void mirrorWakeShortPressToNvs() {
 
 // Everything that follows the sleep screen and the files written for it. Shared by an
 // ordinary sleep and by the one the BookOrbit sleep sync postponed.
+#if CROSSINK_SCALABLE_FONTS
+// Letters drawn while reading, kept so the first pages after a wake skip FreeType.
+static constexpr const char* SAVED_LETTERS_PATH = "/.crosspoint/glyph_cache.bin";
+#endif
+
 static void powerDownForDeepSleep() {
   // Last chance to sample: startDeepSleep() cuts the SD rail on X3, so nothing
   // can be written again until the next wake.
   BatteryDiagnosticLog::record(BatteryDiagnosticLog::Event::Sleep, BoardConfig::ACTIVE.name);
   BatteryUsage::record(BatteryUsage::Event::Sleep, static_cast<uint8_t>(powerManager.getBatteryPercentage()),
                        gpio.isUsbConnected());
+#if CROSSINK_SCALABLE_FONTS
+  HalScalableFont::saveGlyphCache(SAVED_LETTERS_PATH);
+#endif
   // All sleep-time file writes are complete. Stop SDMMC before the power path
   // cuts peripheral rails and isolates the bus pads; SPI boards are a no-op.
   libraryScanSleepToken.save(!library::libraryIndexNeedsRefresh());
+  CardSpace::saveForSleep();
   Storage.shutdown();
 
   putTiltSensorToSleepForDeepSleep();
@@ -1296,7 +1310,7 @@ static bool hasSyncableOpenEpub() {
 }
 
 // What the sleep sync does besides the open book: the BookOrbit Home's own sync, and the
-// new-book downloads. Either one is worth a sleep sync with no EPUB open.
+// missing-book downloads. Either one is worth a sleep sync with no EPUB open.
 static bool sleepSyncHasLibraryWork() {
   if (UITheme::hasBookOrbitHome()) return true;
 #if CROSSINK_APP_SLEEP_AUTO_DOWNLOAD
@@ -1595,6 +1609,7 @@ void setup() {
   const esp_reset_reason_t rawResetReason = esp_reset_reason();
   const esp_sleep_wakeup_cause_t rawWakeupCause = esp_sleep_get_wakeup_cause();
   if (libraryScanSleepToken.consume(rawResetReason == ESP_RST_DEEPSLEEP)) library::restoreLibraryIndexAfterSleep();
+  CardSpace::restoreAfterSleep(rawResetReason == ESP_RST_DEEPSLEEP);
 
 #ifdef ENABLE_SERIAL_LOG
 #ifdef CROSSPOINT_WAIT_FOR_USB_SERIAL
@@ -1753,6 +1768,10 @@ void setup() {
   // power era used to correct queued reading-stats timestamps at sync time.
   WallClock::initAtBoot();
   APP_STATE.loadFromFile();
+#if CROSSINK_SCALABLE_FONTS
+  // The file names the exact build that drew it, so a reflash starts clean.
+  HalScalableFont::loadGlyphCache(SAVED_LETTERS_PATH);
+#endif
   mirrorWakeShortPressToNvs();
   // Needs SETTINGS for the clock's UTC offset, so it cannot run any earlier.
   BatteryDiagnosticLog::record(BatteryDiagnosticLog::Event::Wake, BoardConfig::ACTIVE.name,

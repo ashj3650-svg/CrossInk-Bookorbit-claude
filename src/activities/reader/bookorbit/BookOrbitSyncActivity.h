@@ -104,7 +104,7 @@ class BookOrbitSyncActivity final : public Activity, private BookOrbitSyncReport
   // screen, progress follows smart sync's rules and is left alone when they cannot
   // decide. Power is the only input: the press that would wake the device cancels it.
   // An empty epubPath is a sleep sync with no EPUB open: it skips the book and does the
-  // rest (the other recent books, the Home, new-book downloads).
+  // rest (the other recent books, the Home, missing-book downloads).
   bool sleepSync = false;
   void runSleepSync();
   // True once the sync has been abandoned for a wake press; the device is rebooting.

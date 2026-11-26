@@ -23,17 +23,22 @@ BookPrep::StopCheck libraryStopCheck = nullptr;
 
 bool libraryBuildCancelled(void*) { return libraryStopCheck != nullptr && libraryStopCheck(); }
 
-// The BookOrbit Home's cover slot for the book at `index` (0 = the book being read).
-void homeCoverSize(const GfxRenderer& renderer, const int index, int& width, int& height) {
-  const auto slot =
-      BookOrbitHomeLayout::coverSlot(BookOrbitHomeLayout::grid(renderer), SETTINGS.shouldTrackReadingStats(), index);
-  width = slot.width;
-  height = slot.height;
-}
-
 }  // namespace
 
 namespace BookPrep {
+
+void homeCoverSize(GfxRenderer& renderer, const int index, int& width, int& height) {
+  // The layout reads the screen size and status-bar inset from the renderer's orientation.
+  // Callers hold the renderer (the sleep sync, or the reader under its RenderLock), so it
+  // is turned to portrait just for the arithmetic and back.
+  const auto orientation = renderer.getOrientation();
+  renderer.setOrientation(GfxRenderer::Orientation::Portrait);
+  const auto slot =
+      BookOrbitHomeLayout::coverSlot(BookOrbitHomeLayout::grid(renderer), SETTINGS.shouldTrackReadingStats(), index);
+  renderer.setOrientation(orientation);
+  width = slot.width;
+  height = slot.height;
+}
 
 bool generateHomeThumb(const std::string& path, const int width, const int height, GfxRenderer& renderer,
                        bool* noCoverImage) {
@@ -48,7 +53,7 @@ bool generateHomeThumb(const std::string& path, const int width, const int heigh
       return false;
     }
     if (epub.generateAdaptiveThumbBmp(width, height, &renderer, SETTINGS.getReaderFontId())) return true;
-    if (noCoverImage) *noCoverImage = !epub.hasCoverImage();
+    if (noCoverImage) *noCoverImage = !epub.hasDecodableCoverImage();
     return false;
   }
   if (FsHelpers::hasXtcExtension(path)) {

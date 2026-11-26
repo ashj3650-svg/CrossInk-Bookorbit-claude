@@ -196,6 +196,15 @@ class BookOrbitCatalogClient {
    */
   static bool fetchBooks(const BookOrbitBookQuery& query, int page, BookOrbitBookPage& outPage);
 
+  /**
+   * Only the book ids of a listing page, `size` books a page (the server may give fewer:
+   * outPageSize says how many it does), for a pass over a whole library: a few requests
+   * of a few bytes a book instead of one per PAGE_SIZE books with their titles.
+   * Not for shelves (query.shelf).
+   */
+  static bool fetchBookIds(const BookOrbitBookQuery& query, int page, int size, std::vector<int64_t>& outIds,
+                           int& outTotal, int& outPageSize);
+
   /** The total of a books listing, read from a single-item page. -1 on failure. */
   static int fetchBookTotal(const BookOrbitBookQuery& query);
 

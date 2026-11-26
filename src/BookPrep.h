@@ -28,7 +28,7 @@ bool prepareEpub(const std::string& path, GfxRenderer& renderer);
 
 /**
  * Generates the BookOrbit Home's cover thumbnails for the recent books it lists, in the
- * sizes it draws them, as Home would behind a Loading popup on its next visit.
+ * sizes it draws them, as Home would on its next visit.
  */
 void prepareHomeCovers(GfxRenderer& renderer, StopCheck stopped);
 
@@ -37,6 +37,13 @@ void prepareHomeCovers(GfxRenderer& renderer, StopCheck stopped);
  * files transferred), as the Library would on its next visit.
  */
 void refreshLibraryIndex(StopCheck stopped);
+
+/**
+ * The size the BookOrbit Home draws the cover of the book at `index` (0 = the book being
+ * read, 1 and on = the "Also reading" rows). Home is always portrait, so this is too, even
+ * when the renderer is turned for a landscape book.
+ */
+void homeCoverSize(GfxRenderer& renderer, int index, int& width, int& height);
 
 /**
  * Generates one BookOrbit Home thumbnail (EPUB or XTC) at `width` x `height` when it is not

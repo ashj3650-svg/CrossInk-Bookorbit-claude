@@ -7,14 +7,23 @@
 // bookorbit.json and on the SD card, so values are only ever appended.
 enum class BookOrbitHomeShelfKind : uint8_t {
   DISCOVER = 0,        // the dashboard's random draw
-  RECENTLY_ADDED = 1,  // the catalog's newest books
+  RECENTLY_ADDED = 1,  // the catalog's newest books (X3/X4 only: Just downloaded replaces it)
   WANT_TO_READ = 2,    // the dashboard's want-to-read shelf
   COLLECTION = 3,      // one collection, by id
   SMART_SCOPE = 4,     // one SmartScope, by id
-  NEW_ON_READER = 5,   // books Download New Books brought in, not opened yet (no server list)
+  NEW_ON_READER = 5,   // "Just downloaded": the newest books the sleep sync brought in (no server list)
 };
 
 constexpr int BOOKORBIT_HOME_SHELF_KIND_COUNT = 6;
+
+// Where the sleep sync downloads books (PSRAM boards), "Just downloaded" stands in for
+// Recently added: the server's newest books end up on the card anyway, so the shelf shows
+// what arrived instead. The X3/X4 download nothing behind the sleep screen and keep it.
+constexpr BookOrbitHomeShelfKind homeShelfKindOnThisBoard(const BookOrbitHomeShelfKind kind,
+                                                          const bool downloadsInSleep) {
+  return downloadsInSleep && kind == BookOrbitHomeShelfKind::RECENTLY_ADDED ? BookOrbitHomeShelfKind::NEW_ON_READER
+                                                                            : kind;
+}
 
 // Collections and SmartScopes are the server's own lists, picked by id.
 constexpr bool isNamedHomeShelfKind(const BookOrbitHomeShelfKind kind) {

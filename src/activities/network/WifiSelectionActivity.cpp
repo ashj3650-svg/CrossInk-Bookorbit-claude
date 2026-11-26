@@ -24,6 +24,7 @@
 #include "components/UIThemeTokens.h"
 #include "components/UiAppHelpers.h"
 #include "fontIds.h"
+#include "network/WifiUtils.h"
 
 namespace fui = freeink::ui;
 
@@ -732,10 +733,10 @@ void WifiSelectionActivity::attemptConnection() {
   WiFi.setScanMethod(WIFI_ALL_CHANNEL_SCAN);
   WiFi.setSortMethod(WIFI_CONNECT_AP_BY_SIGNAL);
 
-  // Set hostname so routers show "CrossPoint-Reader-AABBCCDDEEFF" instead of "esp32-XXXXXXXXXXXX"
+  // Set hostname so routers show "AshadsBook-AABBCCDDEEFF" instead of "esp32-XXXXXXXXXXXX"
   String mac = WiFi.macAddress();
   mac.replace(":", "");
-  String hostname = "CrossPoint-Reader-" + mac;
+  String hostname = String(DEVICE_HOSTNAME_PREFIX) + mac;
   WiFi.setHostname(hostname.c_str());
 
   wl_status_t beginStatus = WL_IDLE_STATUS;

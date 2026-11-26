@@ -282,18 +282,21 @@ void BookOrbitSettingsActivity::handleHomeSelection() {
 
 void BookOrbitSettingsActivity::showShelfSources(const int shelf) {
   if (!optionPopup) return;
-  // The sources every server has (and the books Download New Books brought in, where it
-  // exists), then the collections and SmartScopes the last refresh saved, collections
-  // first. Pointers into shelfOptions and the translations, which the popup copies: under
+  // The sources every server has (with Just downloaded in Recently added's place where the
+  // sleep sync downloads books), then the collections and SmartScopes the last refresh
+  // saved, collections first. Pointers into shelfOptions and the translations, which the popup copies: under
   // 300 bytes of stack for the longest list, on the main loop.
   static constexpr BookOrbitHomeShelfKind BUILT_IN_KINDS[] = {
       BookOrbitHomeShelfKind::DISCOVER,
-      BookOrbitHomeShelfKind::RECENTLY_ADDED,
-      BookOrbitHomeShelfKind::WANT_TO_READ,
 #if CROSSINK_APP_SLEEP_AUTO_DOWNLOAD
       BookOrbitHomeShelfKind::NEW_ON_READER,
+#else
+      BookOrbitHomeShelfKind::RECENTLY_ADDED,
 #endif
+      BookOrbitHomeShelfKind::WANT_TO_READ,
   };
+  static_assert(BookOrbitCredentialStore::DOWNLOADS_IN_SLEEP == CROSSINK_APP_SLEEP_AUTO_DOWNLOAD,
+                "the shelf store and Download Missing Books disagree on where the sleep sync downloads");
   constexpr int BUILT_IN = static_cast<int>(sizeof(BUILT_IN_KINDS) / sizeof(BUILT_IN_KINDS[0]));
   const char* names[BUILT_IN + BookOrbitHomeStore::MAX_SHELF_OPTIONS];
   const BookOrbitHomeShelfSource& current = BOOKORBIT_STORE.getHomeShelf(shelf);

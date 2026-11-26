@@ -78,17 +78,3 @@ void BookOrbitNewBooks::add(const int64_t bookId, const std::string& path, const
   strncpy(books[0].title, title.c_str(), sizeof(books[0].title) - 1);
   save(books, static_cast<uint8_t>(count + 1));
 }
-
-void BookOrbitNewBooks::markOpened(const std::string& path) {
-  Book books[MAX_BOOKS];
-  const uint8_t count = load(books);
-  if (count == 0) return;
-  const uint32_t hash = BookOrbitDownloadIndex::pathHash(path);
-  uint8_t kept = 0;
-  for (uint8_t i = 0; i < count; i++) {
-    if (books[i].pathHash != hash) books[kept++] = books[i];
-  }
-  if (kept == count) return;
-  LOG_INF("BONB", "%s opened: no longer new", path.c_str());
-  save(books, kept);
-}

@@ -59,7 +59,8 @@ void drawShelf(const BookOrbitHomePageContext& context, const Rect& tile, const 
   GfxRenderer& renderer = context.renderer;
   const BookOrbitHomeTiles& tiles = context.tiles;
   tiles.drawTileHeader(tile, BookOrbitHomeText::shelfTitle(shelf.source), &shelfIcon(shelf.source.kind));
-  if (shelf.count == 0 && shelf.source.kind == BookOrbitHomeShelfKind::NEW_ON_READER) {
+  const bool justDownloaded = shelf.source.kind == BookOrbitHomeShelfKind::NEW_ON_READER;
+  if (shelf.count == 0 && justDownloaded) {
     tiles.drawTileFooter(tile, tr(STR_HOME_NO_NEW_BOOKS));
     return;
   }
@@ -72,7 +73,8 @@ void drawShelf(const BookOrbitHomePageContext& context, const Rect& tile, const 
     BookOrbitHomeStore::coverPath(book, slot.width, slot.height, path, sizeof(path));
     tiles.drawCoverFile(path, slot, false);
     tiles.drawFitted(SMALL_FONT_ID, slot.x, slot.y + slot.height + 1, book.title, slot.width);
-    if ((onCardMask & (1u << i)) != 0) {
+    // Every Just downloaded book is on the card: a mark on each would say nothing.
+    if (!justDownloaded && (onCardMask & (1u << i)) != 0) {
       constexpr int markSize = 25;
       const int markX = slot.x + slot.width - markSize - 3;
       const int markY = slot.y + 3;

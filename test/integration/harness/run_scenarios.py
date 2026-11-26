@@ -945,7 +945,8 @@ def scenario_home_shelf_sources(verbose: bool) -> None:
         # last row, and Up again to Refresh lists, which restarts into the shelves' boot.
         script = "3000:POWER:120;4500:UP:120;5500:CONFIRM:120;6500:UP:120;7500:CONFIRM:120"
         # That boot fetches, then shows the rows on Refresh: Up twice to the top shelf, whose
-        # popup lists Discover, Recently added and Want to Read, then the two collections
+        # popup lists Discover, Recently added (Just downloaded on PSRAM boards) and Want to
+        # Read, then the two collections
         # and the scope, on the collection it shows. Down twice to the scope, then Back.
         after = ";".join(["9000:UP:120", "9500:UP:120", "10500:CONFIRM:120", "11500:DOWN:120",
                           "12000:DOWN:120", "13000:CONFIRM:120", "14500:BACK:120"])
@@ -1003,30 +1004,82 @@ def sleep_sync_with_bookorbit_home(fs: "SimFs", top_shelf: str | None = None) ->
 
 def scenario_sleep_sync_home_before_downloads(verbose: bool) -> None:
     """The sleep sync refreshes the Home before it downloads new books, so a long download
-    cannot cost the Home its sync, then lists the downloads on New on your reader.
+    cannot cost the Home its sync, then lists the downloads on Just downloaded. The top
+    shelf starts as Recently added, which these boards turn into Just downloaded.
     PSRAM boards only (x4-classic-simulator): the C3 simulator has no downloads."""
     manifest, _ = load_seed()
     source = INTEGRATION / "library" / manifest["progress"][2]["file"]
     with tempfile.TemporaryDirectory(prefix="crossink-integ-") as tmp:
         fs = SimFs(Path(tmp), manifest["kosync"])
-        sleep_sync_with_bookorbit_home(fs, top_shelf=f"{HOME_SHELF_KIND['new_on_reader']}::")
+        sleep_sync_with_bookorbit_home(fs, top_shelf=f"{HOME_SHELF_KIND['recently_added']}::")
         bookorbit = json.loads((fs.crosspoint / "bookorbit.json").read_text())
-        # Every book on the server counts as added after the watermark.
-        bookorbit.update({"autoDownloadNew": True, "autoDownloadAfter": 1, "autoDownloadAfterId": 0})
+        # Every book of the library is missing from this card.
+        bookorbit["autoDownloadNew"] = True
         (fs.crosspoint / "bookorbit.json").write_text(json.dumps(bookorbit))
         sim_path = fs.add_book(source)
         fs.set_open_book(sim_path)
         write_progress_bin(fs.epub_cache_dir(sim_path) / "progress.bin", 4, 0, 1)
 
-        output = run_simulator(fs, input_script="6000:POWER:120", choice="none", timeout_s=240, verbose=verbose)
+        output = run_simulator(fs, input_script="6000:POWER:120", choice="none", timeout_s=600, verbose=verbose)
         assert "Sleep sync over" in output, "sleep sync never ran to its end"
         if "New books:" not in output:
-            raise AssertionError("no new-book downloads: run this one against x4-classic-simulator")
+            raise AssertionError("no book downloads: run this one against x4-classic-simulator")
         home = output.index("Home sync done")
         assert home < output.index("New books:"), "the Home sync came after the downloads"
         top, _ = home_snapshot_shelves(fs)
-        assert top["kind"] == HOME_SHELF_KIND["new_on_reader"], f"top shelf is not New on your reader: {top}"
-        assert len(top["ids"]) > 0, "New on your reader does not list the books just downloaded"
+        assert top["kind"] == HOME_SHELF_KIND["new_on_reader"], f"Recently added did not become Just downloaded: {top}"
+        assert len(top["ids"]) > 0, "Just downloaded does not list the books just downloaded"
+
+
+def scenario_sleep_sync_downloads_missing_books(verbose: bool) -> None:
+    """Download Missing Books: the first sleep downloads every library book missing from
+    the card, newest first; the next finds none missing and leaves a book deleted from the
+    card deleted. PSRAM boards only (x4-classic-simulator)."""
+    manifest, _ = load_seed()
+    with tempfile.TemporaryDirectory(prefix="crossink-integ-") as tmp:
+        fs = SimFs(Path(tmp), manifest["kosync"])
+        fs.enable_sync_on_sleep()
+        bookorbit = json.loads((fs.crosspoint / "bookorbit.json").read_text())
+        bookorbit["autoDownloadNew"] = True
+        (fs.crosspoint / "bookorbit.json").write_text(json.dumps(bookorbit))
+
+        def sleep(timeout_s: int) -> str:
+            output = run_simulator(fs, input_script="6000:POWER:120", choice="none", timeout_s=timeout_s,
+                                   verbose=verbose)
+            assert "Sleep sync over" in output, "sleep sync never ran to its end"
+            if "Library:" not in output:
+                raise AssertionError("no missing-book pass: run this one against x4-classic-simulator")
+            return output
+
+        first = sleep(600)
+        library = re.search(r"Library: (\d+) books, (\d+) missing from the card, (\d+) deleted", first)
+        assert library, "the pass did not report the library"
+        total, missing, deleted = (int(n) for n in library.groups())
+        assert total > 20 and missing == total and deleted == 0, f"first pass: {library.group(0)}"
+        downloads = re.findall(r"Book (\d+) -> (.+?): result 0$", first, re.MULTILINE)
+        assert len(downloads) > 20, f"only {len(downloads)} books downloaded"
+        ids = [int(book_id) for book_id, _ in downloads]
+        assert len(set(ids)) == len(ids), "a book was downloaded twice"
+        for _, path in downloads:
+            assert (fs.fs / path.lstrip("/")).is_file(), f"{path} is not on the card"
+        seen = fs.crosspoint / "bookorbit_auto_download.bin"
+        assert seen.is_file(), "the books seen on the card were not saved"
+        assert struct.unpack_from("<I", seen.read_bytes(), 12)[0] >= len(downloads), "seen list too short"
+
+        # Delete one: the next sleep must not bring it back, nor download anything else.
+        (fs.fs / downloads[-1][1].lstrip("/")).unlink()
+        second = sleep(240)
+        assert f"Library: {total} books, 0 missing from the card, 1 deleted" in second, \
+            "the second pass did not find the library on the card with one book deleted"
+        assert "result 0" not in second, "the second pass downloaded a book again"
+
+        # Turning the setting on again forgets that: the deleted book comes back.
+        bookorbit = json.loads((fs.crosspoint / "bookorbit.json").read_text())
+        bookorbit["autoDownloadNew"] = True
+        (fs.crosspoint / "bookorbit.json").write_text(json.dumps(bookorbit))
+        seen.unlink()
+        third = sleep(240)
+        assert f"Book {downloads[-1][0]} -> {downloads[-1][1]}: result 0" in third, "the deleted book did not come back"
 
 
 def scenario_sleep_sync_recent_books_unchanged(verbose: bool) -> None:
@@ -3269,6 +3322,7 @@ SCENARIOS = {
     "sleep_sync_push": scenario_sleep_sync_push,
     "sleep_sync_refreshes_home": scenario_sleep_sync_refreshes_home,
     "sleep_sync_home_before_downloads": scenario_sleep_sync_home_before_downloads,
+    "sleep_sync_downloads_missing_books": scenario_sleep_sync_downloads_missing_books,
     "sleep_sync_without_open_book": scenario_sleep_sync_without_open_book,
     "sleep_sync_recent_books_unchanged": scenario_sleep_sync_recent_books_unchanged,
     "sleep_sync_failure_keeps_home": scenario_sleep_sync_failure_keeps_home,

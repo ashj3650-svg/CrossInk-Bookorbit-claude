@@ -51,6 +51,47 @@ the stem-darkening toggle. Missing families use automatic hinting, grayscale
 output, the default interpreter, and no outline adjustments. The file currently
 keeps at most 24 modified family profiles to bound RAM use while settings are open.
 
+## `/.crosspoint/glyph_cache.bin`
+
+### Version 1
+
+Scalable-font letters (TTF and the built-in outline fonts) kept across deep
+sleep. `HalScalableFont::saveGlyphCache()` writes it just before storage shuts
+down for sleep, when at least 8 letters were drawn since the wake; boot reads it
+back into PSRAM and each face takes its letters when it opens. All fields are
+little-endian.
+
+| Offset | Size | Field |
+| --- | --- | --- |
+| 0 | 4 | Magic `0x434C4743` ("CGLC") |
+| 4 | 4 | Version, `1` |
+| 8 | 4 | Build stamp: FNV-1a of `CROSSINK_VERSION`, build date and time, seeded with the adapter revision |
+| 12 | 4 | Payload bytes (file size minus this 24-byte header) |
+| 16 | 4 | FNV-1a of the payload |
+| 20 | 4 | Record count |
+
+Each record is 20 bytes, followed by its 2-bit pixels when it has them
+(`(width * height + 3) / 4` bytes, packed like the in-memory cache):
+
+| Offset | Size | Field |
+| --- | --- | --- |
+| 0 | 4 | Face fingerprint (`HalScalableFont::fingerprint()`: font content plus render options) |
+| 4 | 4 | Codepoint, or `0x80000000 | glyph ID` for a shaped ligature |
+| 8 | 2 | Advance, 12.4 fixed point |
+| 10 | 2 | Left bearing (signed) |
+| 12 | 2 | Top bearing (signed) |
+| 14 | 1 | Point size |
+| 15 | 1 | Width |
+| 16 | 1 | Height |
+| 17 | 1 | `1` when pixels follow, else `0` (metrics only) |
+| 18 | 2 | Reserved, zero |
+
+The file is capped at 96 KB, filled with each cache set's most recent letter
+first. A file from another build, with a bad checksum or with damaged records is
+ignored and replaced at the next sleep. Temporary (dictionary) faces are never
+saved. Deleting the file only costs the first pages after the next wake their
+redraw.
+
 ## `/.crosspoint/sleep-image-index/<directory-hash>-{bmp,all}.idx`
 
 ### Version 1
@@ -1060,26 +1101,46 @@ then renames it into place, so a failed refresh keeps the previous list.
 
 The settings in `bookorbit.json` keep the chosen shelves as two strings, `homeShelfTop` and
 `homeShelfBottom`, each `kind:id:name`: `kind` is 0 Discover, 1 Recently Added, 2 Want to
-Read, 3 collection, 4 SmartScope or 5 New on your reader, and only a collection or SmartScope has an id and a
-name (`3:12:Science fiction`, `2::`). The name runs to the end of the string, so it may
-hold colons. A missing or unreadable value falls back to Discover over Recently Added.
+Read, 3 collection, 4 SmartScope or 5 Just downloaded (named New on your reader before), and only a collection
+or SmartScope has an id and a name (`3:12:Science fiction`, `2::`). The name runs to the end of the string, so it
+may hold colons. A missing or unreadable value falls back to Discover over Recently Added. On boards whose sleep
+sync downloads books (X4 Classic, X4 Pro, reTerminal Sticky), a Recently Added shelf (1) reads as Just downloaded
+(5), and the next save writes it so.
 
-Download New Books keeps three more keys there: `autoDownloadNew` (the setting), and the
-newest book the sleep sync has taken so far, `autoDownloadAfter` (when it was added, UTC epoch
-seconds) and `autoDownloadAfterId` (its book id, for books added the same second). Turning the
-setting on sets `autoDownloadAfter` to the current time, or to 0 when the clock cannot be
-trusted, in which case the next sleep sync sets it to the newest book Recently Added lists
-and downloads nothing that time. Missing keys read as off.
+Download Missing Books keeps one more key there: `autoDownloadNew` (the setting). A missing
+key reads as off. Earlier versions also kept `autoDownloadAfter` and `autoDownloadAfterId`
+(a Recently Added watermark); they are ignored now and dropped at the next save.
+
+## `/.crosspoint/bookorbit_auto_download.bin`
+
+### Version 1
+
+The BookOrbit books Download Missing Books has seen on the card
+(`src/network/BookOrbitAutoDownload.cpp`): every book a sleep sync found there (through
+`bookorbit_downloads.bin`) or downloaded. A listed book that is no longer on the card was
+deleted, and is not downloaded again. Turning the setting on removes the file, so the next
+sleep sync brings back every book missing from the card. Rewritten whole through
+`bookorbit_auto_download.tmp` when a pass adds to it. A file with another magic or version,
+another server, or more than 8192 books reads as empty.
+
+| Offset | Size | Field |
+| --- | --- | --- |
+| 0 | 4 | Magic, `0x44414F42` |
+| 4 | 2 | Version |
+| 6 | 2 | Reserved, 0 |
+| 8 | 4 | `BookOrbitDownloadIndex::pathHash` of the server's base URL |
+| 12 | 4 | Book count |
+| 16 | 8 each | `int64_t` catalog book ids, ascending |
 
 ## `/.crosspoint/bookorbit_new_books.bin`
 
 ### Version 1
 
-The books Download New Books brought in that nobody has opened yet, newest first: what a
-Home shelf set to New on your reader lists (`src/util/BookOrbitNewBooks.h`). The sleep sync
-adds each book it downloads, the reader takes a book off as it opens it, and the file is
-removed when the list empties. It is read and rewritten whole; a file with another magic or
-version, or more than 8 books, is ignored.
+The newest books Download Missing Books brought in, newest first, opened or not: what a Home
+shelf set to Just downloaded lists (`src/util/BookOrbitNewBooks.h`), the first four of them
+still on the card. The sleep sync adds each book it downloads, and the oldest falls off past
+8. It is read and rewritten whole; a file with another magic or version, or more than 8
+books, is ignored. (Before Just downloaded, the reader took a book off as it opened it.)
 
 | Offset | Size | Field |
 | --- | --- | --- |

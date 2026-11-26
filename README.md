@@ -29,7 +29,7 @@ BookOrbit exposes a KOReader-compatible sync API, so this fork talks to it the s
 Choose **BookOrbit** in **Settings → Display → UI Theme**, and Home becomes three pages of tiles modeled on BookOrbit's own dashboard:
 
 - **Home** — the current book with its chapter, progress and time left (Confirm resumes it), your streak, this week's reading, your yearly goal, the BookOrbit tile that refreshes everything, and the other books you are reading, on this device or another one.
-- **Library** — the catalog's Discover and Recently Added shelves, links to the catalog, its authors and its series, and what is on the card: how many books, how many came from BookOrbit, and how full the card is. A book that is not on the card yet downloads from its cover, and Home comes back once it is done.
+- **Library** — two shelves (Discover and, on the X4 Classic, X4 Pro and reTerminal Sticky, Just downloaded: the books the sleep sync put on the card; Recently Added on the X3/X4; pick others in Settings > BookOrbit Sync > Home), links to the catalog, its authors and its series, and what is on the card: how many books, how many came from BookOrbit, and how full the card is. A book that is not on the card yet downloads from its cover, and Home comes back once it is done.
 - **Statistics** — a year of reading, one square a day, when you will finish the current book, the times and days you read, your all-time totals, the next badge and a highlight of the day.
 
 Left and Right turn pages, Up and Down move between tiles; on touch devices, swipe between pages and tap a tile. Opening Home never waits on the network: Sync on Sleep or the BookOrbit tile bring the server's numbers, reading done on the device counts straight away, and without an account the theme runs on your own numbers. The [reader features guide](docs/reader-features.md#bookorbit-home) has the details.
@@ -50,10 +50,10 @@ These come with v1.6.1+bookorbit.10 and later. The [changelog](CHANGELOG.md) has
 
 ### BookOrbit and Wi-Fi (X4 Classic, X4 Pro and reTerminal Sticky)
 
-- **Wi-Fi at Home** — Wi-Fi joins your network while Home shows and goes off in a book, on sleep, or after 10 idle minutes. Settings → System → Wi-Fi at Home.
+- **Wi-Fi at Home** — Wi-Fi joins your network while Home shows and goes off in a book, on sleep, or after 10 idle minutes. A network you join by hand in Settings → System → Wi-Fi Networks stays connected too. The web page answers at http://ashadsbook.local/. Settings → System → Wi-Fi at Home.
 - **Sync on open** — opening a book with Wi-Fi at Home connected first fetches its latest BookOrbit position.
 - **Sleep sync for recent books** — the sync behind the sleep screen covers up to 10 recent books, and the most recently saved position wins.
-- **Download New Books** — the sleep sync downloads books newly added to your BookOrbit library (Settings → BookOrbit Sync). The **New on your reader** Home shelf lists the ones you have not opened yet.
+- **Download Missing Books** — the sleep sync downloads every book of your BookOrbit library that is not on the card, newest first (Settings → BookOrbit Sync). A book you delete from the card stays deleted. It stops when the card is nearly full or the battery is below 15%. The **Just downloaded** shelf on the Library page shows the newest ones, so you can see what arrived and open it from there.
 - **Background catalog downloads** — downloads from the catalog run while you keep browsing.
 
 ### Speed
@@ -72,6 +72,7 @@ Index ahead, Next page ready and covers from memory need the extra memory of the
 - **Device PIN** — Settings → System → Device → Device PIN sets a four-digit, numbers-only PIN asked for each time the reader is turned on or woken. On the PIN screen, Up/Right and Down/Left change the highlighted digit, Confirm moves on (and checks the PIN after the fourth digit), Back steps back. Forgot it? Delete `.crosspoint/device_pin.bin` from the SD card on a computer. The PIN locks the reader's screens; it does not encrypt the card.
 - **Search** — the BookOrbit Home's Search button (Up from the current book) opens the Library on its search keyboard; in the Library, Right is Search. Searches match titles, authors and series.
 - **Battery Use** — Settings → System → Device → Battery Use shows the drain asleep (per day), awake (per hour) and per sleep sync.
+- **Ashad's Books** — the boot screen and the plain sleep screen show "Ashad's Books" with an open book logo, and the reader is called ashadsbook on your network (http://ashadsbook.local/, AshadsBook-… in the router's list).
 
 ---
 
@@ -140,8 +141,8 @@ Turn on **Settings → System → BookOrbit Sync → Sync on Sleep** and the dev
 
 - **Waking the device cancels the sync.** Press Power the way you would to wake it. The sync stops at its next step and the device wakes as usual. Whatever the sync had already sent is kept, and the rest follows on the next sync.
 - **Progress follows the Smart sync rules**, whatever **Sync Behavior** says, because nobody is there to answer the choice screen. When those rules cannot decide (the first sync of a book on this device, or both sides having moved), progress is left alone for your next manual sync. Highlights, bookmarks and reading sessions sync either way.
-- **The BookOrbit Home syncs too**, under the BookOrbit theme: right after the reading positions, and before any new-book downloads, the sync refreshes what the BookOrbit tile's **Sync now** brings (stats, shelves, Also Reading). The tile then counts from the moment the device went to sleep.
-- **It is skipped** when no Wi-Fi network is saved, and when the battery is below 10% with no charger connected. With no EPUB open, it still runs for the BookOrbit Home and Download New Books when either is on.
+- **The BookOrbit Home syncs too**, under the BookOrbit theme: right after the reading positions, and before any book downloads, the sync refreshes what the BookOrbit tile's **Sync now** brings (stats, shelves, Also Reading). The tile then counts from the moment the device went to sleep.
+- **It is skipped** when no Wi-Fi network is saved, and when the battery is below 10% with no charger connected. With no EPUB open, it still runs for the BookOrbit Home and Download Missing Books when either is on.
 
 Each sync keeps Wi-Fi on for a few seconds, and longer when no saved network answers, so the option is off by default.
 

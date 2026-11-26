@@ -35,6 +35,7 @@
 #include "BookOrbitBookmarkStore.h"
 #include "BookOrbitCredentialStore.h"
 #include "BookOrbitStatsQueue.h"
+#include "BookPrep.h"
 #include "BookStatsActivity.h"
 #include "BookStatsTracking.h"
 #include "ChapterXPathResolver.h"
@@ -132,6 +133,8 @@ constexpr unsigned long TRANSIENT_FEEDBACK_MS = 1000UL;
 constexpr unsigned long IDLE_SD_FONT_PREWARM_DELAY_MS = 400UL;
 constexpr uint32_t IDLE_SD_FONT_PREWARM_MIN_FREE = 64U * 1024U;
 constexpr uint32_t IDLE_SD_FONT_PREWARM_MIN_MAX_ALLOC = 40U * 1024U;
+constexpr uint32_t HOME_COVER_PREP_MIN_FREE = 96U * 1024U;
+constexpr uint32_t HOME_COVER_PREP_MIN_MAX_ALLOC = 64U * 1024U;
 constexpr unsigned long MIN_READING_STATS_PAGE_MS = 2000UL;
 constexpr uint32_t MIN_READING_PACE_SAMPLE_SECONDS = 2;
 constexpr uint16_t MIN_STORED_TIME_LEFT_PACE_SAMPLE_COUNT = 3;
@@ -3092,6 +3095,36 @@ void EpubReaderActivity::stopIndexAhead() {
   aheadSpine = -1;
 }
 
+bool EpubReaderActivity::tickHomeCoverPrep() {
+  if (!readerPsramExtras() || homeCoverPrepDone || !epub || !section || aheadSection || activeFootnotePreview ||
+      automaticPageTurnActive || section->isBuilding() || lastRenderCompleteMs == 0 ||
+      (millis() - lastRenderCompleteMs) < HOME_COVER_PREP_IDLE_MS ||
+      backgroundBuildYieldForInput.load(std::memory_order_relaxed)) {
+    return false;
+  }
+  if (!UITheme::hasBookOrbitHome() || !epub->hasDecodableCoverImage()) {
+    homeCoverPrepDone = true;
+    return false;
+  }
+  // The JPEG decoder takes about 53 KB of internal heap in one block.
+  const auto heap = MemoryBudget::snapshot();
+  if (!MemoryBudget::hasHeap(heap, HOME_COVER_PREP_MIN_FREE, HOME_COVER_PREP_MIN_MAX_ALLOC)) return false;
+  RenderLock lock(*this, RenderLock::Mode::Try);
+  if (!lock.ownsLock()) return false;
+
+  const int slot = homeCoverPrepSlot++;
+  if (homeCoverPrepSlot >= 2) homeCoverPrepDone = true;
+  int width = 0;
+  int height = 0;
+  BookPrep::homeCoverSize(renderer, slot, width, height);
+  if (width <= 0 || height <= 0 || Storage.exists(epub->getAdaptiveThumbBmpPath(width, height).c_str())) return false;
+  const unsigned long start = millis();
+  const int fontId = activeSectionFontId != 0 ? activeSectionFontId : SETTINGS.getReaderFontId();
+  const bool made = epub->generateAdaptiveThumbBmp(width, height, &renderer, fontId);
+  LOG_DBG("ERS", "Home cover %dx%d %s in %lu ms", width, height, made ? "made" : "failed", millis() - start);
+  return true;
+}
+
 void EpubReaderActivity::tickIndexAhead() {
   if (!readerPsramExtras() || !epub || !section || activeFootnotePreview || automaticPageTurnActive ||
       section->isBuilding() || section->isPartial() || buildViewportWidth == 0 || lastRenderCompleteMs == 0 ||
@@ -3761,7 +3794,7 @@ void EpubReaderActivity::loop() {
       return;
     }
     idlePrewarmNextPage();
-    tickIndexAhead();
+    if (!tickHomeCoverPrep()) tickIndexAhead();
     return;
   }
 

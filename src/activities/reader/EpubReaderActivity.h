@@ -188,6 +188,14 @@ class EpubReaderActivity final : public Activity {
   bool aheadStopped = false;  // a failed or mismatched build: nothing more for this chapter
   void tickIndexAhead();
   void stopIndexAhead();
+  // Home covers (PSRAM boards, BookOrbit Home): once per opening, while the page sits idle,
+  // the two cover sizes the BookOrbit Home draws this book at are made, so Home shows the
+  // cover at once instead of decoding it first. The decode is one block of up to a second
+  // or two, hence the longer idle wait than Index ahead's.
+  static constexpr unsigned long HOME_COVER_PREP_IDLE_MS = 5000UL;
+  uint8_t homeCoverPrepSlot = 0;  // the next Home slot size to make: 0 (current book), 1 (row)
+  bool homeCoverPrepDone = false;
+  bool tickHomeCoverPrep();
   bool paceSampleWarmupPending = true;
   uint32_t sessionPaceSampleSeconds = 0;
   uint16_t sessionPaceSampleCount = 0;

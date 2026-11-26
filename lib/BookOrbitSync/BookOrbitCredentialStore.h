@@ -1,5 +1,6 @@
 #pragma once
 #include <ArduinoJson.h>
+#include <BoardConfig.h>
 #include <PersistableStore.h>
 
 #include <cstdint>
@@ -31,6 +32,9 @@ class BookOrbitCredentialStore : public PersistableStore<BookOrbitCredentialStor
  public:
   // The Library page's shelves, top then bottom.
   static constexpr int HOME_SHELF_COUNT = 2;
+  // Boards whose sleep sync downloads books (CROSSINK_APP_SLEEP_AUTO_DOWNLOAD in the app):
+  // their Recently added shelf becomes Just downloaded (homeShelfKindOnThisBoard).
+  static constexpr bool DOWNLOADS_IN_SLEEP = !FREEINK_MCU_C3;
 
  private:
   std::string username;
@@ -45,11 +49,11 @@ class BookOrbitCredentialStore : public PersistableStore<BookOrbitCredentialStor
   // on, during the sleep sync. The watermark is the newest book taken so far, by date
   // added (UTC epoch seconds) and then id; 0 means "set it from the server next run".
   bool autoDownloadNew = false;
-  int64_t autoDownloadAfter = 0;
-  int64_t autoDownloadAfterId = 0;
-  // Discover over Recently Added, the Library page before shelves could be chosen.
-  BookOrbitHomeShelfSource homeShelves[HOME_SHELF_COUNT] = {{BookOrbitHomeShelfKind::DISCOVER, {}, {}},
-                                                            {BookOrbitHomeShelfKind::RECENTLY_ADDED, {}, {}}};
+  // Discover over Recently Added, the Library page before shelves could be chosen; Just
+  // downloaded takes Recently Added's place where the sleep sync downloads books.
+  BookOrbitHomeShelfSource homeShelves[HOME_SHELF_COUNT] = {
+      {BookOrbitHomeShelfKind::DISCOVER, {}, {}},
+      {homeShelfKindOnThisBoard(BookOrbitHomeShelfKind::RECENTLY_ADDED, DOWNLOADS_IN_SLEEP), {}, {}}};
 
   BookOrbitCredentialStore() = default;
   ~BookOrbitCredentialStore() = default;
@@ -97,24 +101,15 @@ class BookOrbitCredentialStore : public PersistableStore<BookOrbitCredentialStor
     return syncOnSleep;
   }
 
-  // Sleep-sync downloads of newly added books (see BookOrbitAutoDownload).
+  // Sleep-sync downloads of the library's books missing from the card (see
+  // BookOrbitAutoDownload).
   bool getAutoDownloadNew() const {
     ensureLoaded();
     return autoDownloadNew;
   }
-  int64_t getAutoDownloadAfter() const {
-    ensureLoaded();
-    return autoDownloadAfter;
-  }
-  int64_t getAutoDownloadAfterId() const {
-    ensureLoaded();
-    return autoDownloadAfterId;
-  }
-  void setAutoDownload(const bool enabled, const int64_t after, const int64_t afterId) {
+  void setAutoDownloadNew(const bool enabled) {
     ensureLoaded();
     autoDownloadNew = enabled;
-    autoDownloadAfter = after;
-    autoDownloadAfterId = afterId;
   }
 
   // What a Library page shelf lists: index 0 is the top shelf. The Home snapshot only

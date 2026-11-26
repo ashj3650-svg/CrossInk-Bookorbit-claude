@@ -43,6 +43,10 @@ class HomeActivity final : public Activity {
   int carouselMenuTouchDownIndex = -1;
   bool recentsLoading = false;
   bool recentsLoaded = false;
+  // BookOrbit Home: the cover slots tried this visit (bit per slot) and whether fetched
+  // shelf covers were decoded (see loadBookOrbitThumbnails).
+  uint8_t bookOrbitThumbsTried = 0;
+  bool bookOrbitPendingCoversTried = false;
   bool firstRenderDone = false;
   // Silent restarts keep the panel's previous frame. The first Home paint may
   // need a clean waveform so X4 panels do not diff against a WiFi screen.

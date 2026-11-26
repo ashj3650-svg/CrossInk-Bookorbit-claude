@@ -202,6 +202,15 @@ void onArrivedHome() {
   }
   if (state == State::Off) {
     failures = 0;
+    if (WiFi.status() == WL_CONNECTED) {
+      // Another screen joined a network and left it up: keep it rather than drop and rejoin.
+      LOG_INF("HWIFI", "Taking over the connection another screen left up");
+      attemptScheduled = false;
+      setState(State::Connected);
+      syncClockIfUnset();
+      HomeWebServer::start();
+      return;
+    }
     scheduleAttempt(START_DELAY_MS);
   }
 }
@@ -350,11 +359,27 @@ void HomeWifi::stop(const char* reason) {
 
 bool HomeWifi::isConnected() { return state == State::Connected && WiFi.status() == WL_CONNECTED; }
 
+bool HomeWifi::keepManualConnection() {
+  if (!SETTINGS.wifiAtHome || !linkUp()) return false;
+  // Home is not showing (Settings is), so nothing of Home's is in flight; Released hands
+  // the connection to Home on arrival and to the book-opening switch-off.
+  if (state == State::Scanning) WiFi.scanDelete();
+  releaseCandidates();
+  attemptScheduled = false;
+  stopForBook = false;
+  idleOff = false;
+  failures = 0;
+  setState(State::Released);
+  LOG_INF("HWIFI", "Keeping the connection made in Wi-Fi Networks");
+  return true;
+}
+
 #else
 
 void HomeWifi::tick(bool, unsigned long) {}
 void HomeWifi::onActivityEntering(bool, bool) {}
 void HomeWifi::stop(const char*) {}
 bool HomeWifi::isConnected() { return false; }
+bool HomeWifi::keepManualConnection() { return false; }
 
 #endif

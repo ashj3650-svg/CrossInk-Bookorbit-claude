@@ -240,7 +240,7 @@ BookOrbitBookQuery shelfQuery(const BookOrbitHomeShelfSource& source) {
   return query;
 }
 
-// The books Download New Books brought in and nobody opened yet: listed on the card,
+// The books Download Missing Books brought in and nobody opened yet: listed on the card,
 // with the covers the server keeps for them.
 void fillNewBooksShelf(BookOrbitHomeShelf& shelf) {
   BookOrbitNewBooks::Book books[BookOrbitNewBooks::MAX_BOOKS];

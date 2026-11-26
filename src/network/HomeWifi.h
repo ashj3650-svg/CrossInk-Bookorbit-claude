@@ -22,6 +22,11 @@ void tick(bool onHome, unsigned long idleMs);
 // tick, after the reader's own onEnter().
 void onActivityEntering(bool isHome, bool isReader);
 
+// A connection made by hand on Settings > Wi-Fi Networks, kept up instead of switched off
+// when Wi-Fi at Home is on: Home takes it over on arrival, and a book or sleep takes it down
+// as with Home's own. Returns false (the caller switches the radio off) when not kept.
+bool keepManualConnection();
+
 // Takes the radio down now if Home brought it up (sleep, setting turned off).
 void stop(const char* reason);
 

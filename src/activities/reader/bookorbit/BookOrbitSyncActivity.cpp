@@ -48,6 +48,7 @@
 #include "network/BookOrbitAutoDownload.h"
 #include "network/SavedWifiConnect.h"
 #include "util/BookContentId.h"
+#include "util/CardSpace.h"
 #include "util/ProgressSaveTime.h"
 
 // This file mirrors src/activities/reader/KOReaderSyncActivity.cpp; see that file's
@@ -349,14 +350,17 @@ void BookOrbitSyncActivity::runSleepSync() {
     const bool refreshed = BookOrbitHomeStore::refresh(&sleepSyncWakeRequested, homeCoverSizes);
     LOG_INF("BookOrbit", "Home sync %s", refreshed ? "done" : "left for the next sync");
   }
+  // Then the books copied to the card by other means, so the downloads below know them
+  // as on the card instead of fetching a second copy.
+  if (syncHome && !sleepSyncWakeRequested()) BookOrbitDeviceScan::run(&sleepSyncWakeRequested);
 #if CROSSINK_APP_SLEEP_AUTO_DOWNLOAD
-  // Then the books added to the server since the last sleep, still on this connection.
+  // Then every library book still missing from the card, still on this connection.
   BookOrbitAutoDownload::Summary added;
   if (serverAnswered && !sleepSyncWakeRequested()) {
     added = BookOrbitAutoDownload::run(&sleepSyncWakeRequested);
-    if (added.downloaded > 0 || added.cardFull) {
-      LOG_INF("BookOrbit", "New books: %u downloaded%s", static_cast<unsigned>(added.downloaded),
-              added.cardFull ? ", card nearly full" : "");
+    if (added.downloaded > 0 || added.cardFull || added.lowBattery) {
+      LOG_INF("BookOrbit", "New books: %u downloaded%s%s", static_cast<unsigned>(added.downloaded),
+              added.cardFull ? ", card nearly full" : "", added.lowBattery ? ", battery low" : "");
     }
     // The snapshot above predates them: list them on New on your reader, with covers.
     if (added.downloaded > 0 && syncHome && !sleepSyncWakeRequested()) {
@@ -364,8 +368,6 @@ void BookOrbitSyncActivity::runSleepSync() {
     }
   }
 #endif
-  // After the downloads, so the scan already counts them as on the device.
-  if (syncHome && !sleepSyncWakeRequested()) BookOrbitDeviceScan::run(&sleepSyncWakeRequested);
   SavedWifiConnect::disconnect();
   if (syncHome && !sleepSyncWakeRequested()) {
     BookOrbitHomeStore::decodePendingCovers(&sleepSyncWakeRequested, homeCoverSizes);
@@ -374,11 +376,14 @@ void BookOrbitSyncActivity::runSleepSync() {
   // the next screens would otherwise make you wait for (see BookPrep).
   if (!sleepSyncWakeRequested()) BookPrep::refreshLibraryIndex(&sleepSyncWakeRequested);
 #if CROSSINK_APP_SLEEP_AUTO_DOWNLOAD
-  for (uint8_t i = 0; i < added.downloaded && !sleepSyncWakeRequested(); i++) {
+  for (uint8_t i = 0; i < added.preparedCount && !sleepSyncWakeRequested(); i++) {
     BookPrep::prepareEpub(added.paths[i], renderer);
   }
 #endif
   if (bookOrbitHome && !sleepSyncWakeRequested()) BookPrep::prepareHomeCovers(renderer, &sleepSyncWakeRequested);
+  // The Home's storage bar: counted here, behind the sleep screen, when books changed or
+  // nothing was kept, so the next wake shows it without reading the card's allocation map.
+  if (bookOrbitHome && !sleepSyncWakeRequested()) CardSpace::countIfUnknown();
   LOG_INF("BookOrbit", "Sleep sync over (state=%d)", static_cast<int>(state));
 #ifdef SIMULATOR
   endSimulatorScenarioIfRequested(static_cast<int>(state));
