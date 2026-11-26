@@ -29,7 +29,7 @@ BookOrbit exposes a KOReader-compatible sync API, so this fork talks to it the s
 Choose **BookOrbit** in **Settings → Display → UI Theme**, and Home becomes three pages of tiles modeled on BookOrbit's own dashboard:
 
 - **Home** — the current book with its chapter, progress and time left (Confirm resumes it), your streak, this week's reading, your yearly goal, the BookOrbit tile that refreshes everything, and the other books you are reading, on this device or another one.
-- **Library** — the catalog's Discover and Recently Added shelves, links to the catalog, its authors and its series, and what is on the card: how many books, how many came from BookOrbit, and how full the card is. A book that is not on the card yet downloads from its cover, and Home comes back once it is done.
+- **Library** — two shelves (Discover and, on the X4 Classic, X4 Pro and reTerminal Sticky, Just downloaded: the books the sleep sync put on the card; Recently Added on the X3/X4; pick others in Settings > BookOrbit Sync > Home), links to the catalog, its authors and its series, and what is on the card: how many books, how many came from BookOrbit, and how full the card is. A book that is not on the card yet downloads from its cover, and Home comes back once it is done.
 - **Statistics** — a year of reading, one square a day, when you will finish the current book, the times and days you read, your all-time totals, the next badge and a highlight of the day.
 
 Left and Right turn pages, Up and Down move between tiles; on touch devices, swipe between pages and tap a tile. Opening Home never waits on the network: Sync on Sleep or the BookOrbit tile bring the server's numbers, reading done on the device counts straight away, and without an account the theme runs on your own numbers. The [reader features guide](docs/reader-features.md#bookorbit-home) has the details.
@@ -53,7 +53,7 @@ These come with v1.6.1+bookorbit.10 and later. The [changelog](CHANGELOG.md) has
 - **Wi-Fi at Home** — Wi-Fi joins your network while Home shows and goes off in a book, on sleep, or after 10 idle minutes. A network you join by hand in Settings → System → Wi-Fi Networks stays connected too. The web page answers at http://ashadsbook.local/. Settings → System → Wi-Fi at Home.
 - **Sync on open** — opening a book with Wi-Fi at Home connected first fetches its latest BookOrbit position.
 - **Sleep sync for recent books** — the sync behind the sleep screen covers up to 10 recent books, and the most recently saved position wins.
-- **Download Missing Books** — the sleep sync downloads every book of your BookOrbit library that is not on the card, newest first (Settings → BookOrbit Sync). A book you delete from the card stays deleted. It stops when the card is nearly full or the battery is below 15%. The **New on your reader** Home shelf lists the newest ones you have not opened yet.
+- **Download Missing Books** — the sleep sync downloads every book of your BookOrbit library that is not on the card, newest first (Settings → BookOrbit Sync). A book you delete from the card stays deleted. It stops when the card is nearly full or the battery is below 15%. The **Just downloaded** shelf on the Library page shows the newest ones, so you can see what arrived and open it from there.
 - **Background catalog downloads** — downloads from the catalog run while you keep browsing.
 
 ### Speed

@@ -9,6 +9,7 @@
 #include <Memory.h>
 
 #include <algorithm>
+#include <cstdio>
 
 #include "BookOrbitCredentialStore.h"
 #include "BookOrbitDownloadIndex.h"
@@ -26,22 +27,30 @@ uint8_t onCardMask(const BookOrbitHomeBook* books, const int count) {
   return mask;
 }
 
-// A New on your reader shelf as of the last sync, less the books opened since: the reader
-// takes a book off the list as it opens it, and Home should not wait for the next sync.
-void dropOpenedNewBooks(BookOrbitHomeSnapshot& snapshot) {
-  BookOrbitNewBooks::Book unopened[BookOrbitNewBooks::MAX_BOOKS];
-  int unopenedCount = -1;  // read once, on the first such shelf
+// A Just downloaded shelf lists the card's download list as it is now, not as of the last
+// sync: a shelf that only became Just downloaded (Recently added before this firmware) shows
+// it at once, and a book deleted from the card since leaves it. Covers come with the next
+// sync; until then a book shows a blank cover with its title.
+void fillJustDownloaded(BookOrbitHomeSnapshot& snapshot) {
+  // 448 bytes of stack, once per Home load, on the main loop.
+  BookOrbitNewBooks::Book downloads[BookOrbitNewBooks::MAX_BOOKS];
+  int downloadCount = -1;  // read once, on the first such shelf
+  std::string path;
   for (int s = 0; s < BookOrbitHomeSnapshot::SHELVES; s++) {
+    const BookOrbitHomeShelfSource& chosen = BOOKORBIT_STORE.getHomeShelf(s);
+    if (chosen.kind != BookOrbitHomeShelfKind::NEW_ON_READER) continue;
+    if (downloadCount < 0) downloadCount = BookOrbitNewBooks::load(downloads);
     BookOrbitHomeShelf& shelf = snapshot.shelves[s];
-    if (shelf.source.kind != BookOrbitHomeShelfKind::NEW_ON_READER || shelf.count == 0) continue;
-    if (unopenedCount < 0) unopenedCount = BookOrbitNewBooks::load(unopened);
-    int kept = 0;
-    for (int i = 0; i < shelf.count; i++) {
-      bool stillNew = false;
-      for (int j = 0; j < unopenedCount && !stillNew; j++) stillNew = unopened[j].id == shelf.books[i].id;
-      if (stillNew) shelf.books[kept++] = shelf.books[i];
+    shelf.source = chosen;
+    shelf.count = 0;
+    for (int i = 0; i < downloadCount && shelf.count < BookOrbitHomeShelf::BOOK_COUNT; i++) {
+      if (!BookOrbitDownloadIndex::lookup(downloads[i].id, path)) continue;
+      BookOrbitHomeBook& out = shelf.books[shelf.count++];
+      out = BookOrbitHomeBook{};
+      out.id = downloads[i].id;
+      out.hasCover = true;
+      snprintf(out.title, sizeof(out.title), "%s", downloads[i].title);
     }
-    shelf.count = static_cast<uint8_t>(kept);
   }
 }
 
@@ -61,7 +70,7 @@ void BookOrbitHomeModel::load(const BookOrbitHomeSource& source, const bool trac
   if (hasAccount) {
     snapshot = makeUniqueNoThrow<BookOrbitHomeSnapshot>();
     if (snapshot && !BookOrbitHomeStore::load(*snapshot)) snapshot.reset();
-    if (snapshot) dropOpenedNewBooks(*snapshot);
+    if (snapshot) fillJustDownloaded(*snapshot);
   }
 
   // Only the index header is read: the count as of the Library's last scan, no card walk.

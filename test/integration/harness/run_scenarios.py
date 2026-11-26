@@ -945,7 +945,8 @@ def scenario_home_shelf_sources(verbose: bool) -> None:
         # last row, and Up again to Refresh lists, which restarts into the shelves' boot.
         script = "3000:POWER:120;4500:UP:120;5500:CONFIRM:120;6500:UP:120;7500:CONFIRM:120"
         # That boot fetches, then shows the rows on Refresh: Up twice to the top shelf, whose
-        # popup lists Discover, Recently added and Want to Read, then the two collections
+        # popup lists Discover, Recently added (Just downloaded on PSRAM boards) and Want to
+        # Read, then the two collections
         # and the scope, on the collection it shows. Down twice to the scope, then Back.
         after = ";".join(["9000:UP:120", "9500:UP:120", "10500:CONFIRM:120", "11500:DOWN:120",
                           "12000:DOWN:120", "13000:CONFIRM:120", "14500:BACK:120"])
@@ -1003,13 +1004,14 @@ def sleep_sync_with_bookorbit_home(fs: "SimFs", top_shelf: str | None = None) ->
 
 def scenario_sleep_sync_home_before_downloads(verbose: bool) -> None:
     """The sleep sync refreshes the Home before it downloads new books, so a long download
-    cannot cost the Home its sync, then lists the downloads on New on your reader.
+    cannot cost the Home its sync, then lists the downloads on Just downloaded. The top
+    shelf starts as Recently added, which these boards turn into Just downloaded.
     PSRAM boards only (x4-classic-simulator): the C3 simulator has no downloads."""
     manifest, _ = load_seed()
     source = INTEGRATION / "library" / manifest["progress"][2]["file"]
     with tempfile.TemporaryDirectory(prefix="crossink-integ-") as tmp:
         fs = SimFs(Path(tmp), manifest["kosync"])
-        sleep_sync_with_bookorbit_home(fs, top_shelf=f"{HOME_SHELF_KIND['new_on_reader']}::")
+        sleep_sync_with_bookorbit_home(fs, top_shelf=f"{HOME_SHELF_KIND['recently_added']}::")
         bookorbit = json.loads((fs.crosspoint / "bookorbit.json").read_text())
         # Every book of the library is missing from this card.
         bookorbit["autoDownloadNew"] = True
@@ -1025,8 +1027,8 @@ def scenario_sleep_sync_home_before_downloads(verbose: bool) -> None:
         home = output.index("Home sync done")
         assert home < output.index("New books:"), "the Home sync came after the downloads"
         top, _ = home_snapshot_shelves(fs)
-        assert top["kind"] == HOME_SHELF_KIND["new_on_reader"], f"top shelf is not New on your reader: {top}"
-        assert len(top["ids"]) > 0, "New on your reader does not list the books just downloaded"
+        assert top["kind"] == HOME_SHELF_KIND["new_on_reader"], f"Recently added did not become Just downloaded: {top}"
+        assert len(top["ids"]) > 0, "Just downloaded does not list the books just downloaded"
 
 
 def scenario_sleep_sync_downloads_missing_books(verbose: bool) -> None:

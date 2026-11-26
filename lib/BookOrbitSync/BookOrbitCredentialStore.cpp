@@ -99,6 +99,9 @@ bool BookOrbitCredentialStore::fromJson(JsonVariantConst doc) {
     shelf = BookOrbitHomeShelfSource{};
     shelf.kind = i == 0 ? BookOrbitHomeShelfKind::DISCOVER : BookOrbitHomeShelfKind::RECENTLY_ADDED;
     parseHomeShelf(doc[HOME_SHELF_KEYS[i]] | "", shelf);
+    // A Recently added shelf saved before Just downloaded replaced it turns into that one;
+    // the file follows at the next save.
+    shelf.kind = homeShelfKindOnThisBoard(shelf.kind, DOWNLOADS_IN_SLEEP);
   }
 
   setCfClientId(doc["cfClientId"] | "");

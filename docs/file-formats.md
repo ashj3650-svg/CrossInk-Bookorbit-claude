@@ -1101,9 +1101,11 @@ then renames it into place, so a failed refresh keeps the previous list.
 
 The settings in `bookorbit.json` keep the chosen shelves as two strings, `homeShelfTop` and
 `homeShelfBottom`, each `kind:id:name`: `kind` is 0 Discover, 1 Recently Added, 2 Want to
-Read, 3 collection, 4 SmartScope or 5 New on your reader, and only a collection or SmartScope has an id and a
-name (`3:12:Science fiction`, `2::`). The name runs to the end of the string, so it may
-hold colons. A missing or unreadable value falls back to Discover over Recently Added.
+Read, 3 collection, 4 SmartScope or 5 Just downloaded (named New on your reader before), and only a collection
+or SmartScope has an id and a name (`3:12:Science fiction`, `2::`). The name runs to the end of the string, so it
+may hold colons. A missing or unreadable value falls back to Discover over Recently Added. On boards whose sleep
+sync downloads books (X4 Classic, X4 Pro, reTerminal Sticky), a Recently Added shelf (1) reads as Just downloaded
+(5), and the next save writes it so.
 
 Download Missing Books keeps one more key there: `autoDownloadNew` (the setting). A missing
 key reads as off. Earlier versions also kept `autoDownloadAfter` and `autoDownloadAfterId`
@@ -1134,11 +1136,11 @@ another server, or more than 8192 books reads as empty.
 
 ### Version 1
 
-The books Download Missing Books brought in that nobody has opened yet, newest first: what a
-Home shelf set to New on your reader lists (`src/util/BookOrbitNewBooks.h`). The sleep sync
-adds each book it downloads, the reader takes a book off as it opens it, and the file is
-removed when the list empties. It is read and rewritten whole; a file with another magic or
-version, or more than 8 books, is ignored.
+The newest books Download Missing Books brought in, newest first, opened or not: what a Home
+shelf set to Just downloaded lists (`src/util/BookOrbitNewBooks.h`), the first four of them
+still on the card. The sleep sync adds each book it downloads, and the oldest falls off past
+8. It is read and rewritten whole; a file with another magic or version, or more than 8
+books, is ignored. (Before Just downloaded, the reader took a book off as it opened it.)
 
 | Offset | Size | Field |
 | --- | --- | --- |

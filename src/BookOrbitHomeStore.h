@@ -85,7 +85,7 @@ bool load(BookOrbitHomeSnapshot& out);
 // pending time of ReadingDailyMinutes.
 bool refresh(StopCheck shouldStop, const CoverSizes& sizes);
 
-// Lists the books Download Missing Books brought in on the snapshot's New on your reader
+// Lists the books Download Missing Books brought in on the snapshot's Just downloaded
 // shelves, then fetches their covers. For the sleep sync, which refreshes the snapshot
 // before it downloads. Needs Wi-Fi up for the covers. True when there was nothing to do.
 bool refreshNewBooksShelf(StopCheck shouldStop, const CoverSizes& sizes);
