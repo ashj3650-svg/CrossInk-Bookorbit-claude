@@ -446,7 +446,10 @@ static void silentRestartToHome(const uint32_t payload, const char* const descri
   restartWithSilentToken();
 }
 
-void silentRestart() { silentRestartToHome(0, "target=home"); }
+// The payload carries the Home menu entry to return to (see ActivityManager::setHomeMenuReturn()).
+void silentRestart() {
+  silentRestartToHome(static_cast<uint32_t>(activityManager.pendingHomeMenuReturn()), "target=home");
+}
 
 void restartToHomeAfterStorageHandoff() {
   // Keep this distinct from other callers: USB Drive has released raw SD
@@ -2061,7 +2064,16 @@ void setup() {
     // X4's HALF refresh is the same single-pass clean transition already used
     // by network screens. Keep X3's existing full refresh behavior unchanged.
     const auto homeRefreshMode = gpio.deviceIsX3() ? HalDisplay::FULL_REFRESH : HalDisplay::HALF_REFRESH;
-    activityManager.goHome(HomeMenuItem::NONE, homeRefreshMode);
+    // A screen the Home menu opened restarted on its way back (the BookOrbit catalog does):
+    // Home opens that menu again, as it does without the restart.
+    HomeMenuItem menuReturn = HomeMenuItem::NONE;
+    if (snapshotTarget == SILENT_REBOOT_TARGET_HOME &&
+        snapshotPayload >= static_cast<uint32_t>(HomeMenuItem::FILE_BROWSER) &&
+        snapshotPayload <= static_cast<uint32_t>(HomeMenuItem::SETTINGS_MENU)) {
+      menuReturn = static_cast<HomeMenuItem>(snapshotPayload);
+    }
+    activityManager.setHomeMenuReturn(menuReturn);
+    activityManager.goHome(menuReturn, homeRefreshMode);
   } else {
     // Boot to home screen if no book is open, last sleep was not from reader, back button is held, or reader activity
     // crashed (indicated by readerActivityLoadCount > 0)

@@ -319,6 +319,30 @@ HomeMenuEntries buildSelectableHomeMenuItems(bool hasOpdsServers, bool hasReadin
   return items;
 }
 
+// The screen a menu entry replaces Home with, as goHome() names it on the way back; NONE
+// for the entries that open over Home or open a book.
+HomeMenuItem initialMenuItemForHomeAction(const HomeMenuAction action) {
+  switch (action) {
+    case HomeMenuAction::BrowseFiles:
+      return HomeMenuItem::FILE_BROWSER;
+    case HomeMenuAction::Library:
+      return HomeMenuItem::LIBRARY;
+    case HomeMenuAction::OpdsBrowser:
+      return HomeMenuItem::OPDS_BROWSER;
+    case HomeMenuAction::BookOrbitCatalog:
+      return HomeMenuItem::BOOKORBIT_BROWSER;
+    case HomeMenuAction::FileTransfer:
+      return HomeMenuItem::FILE_TRANSFER;
+    case HomeMenuAction::Settings:
+      return HomeMenuItem::SETTINGS_MENU;
+    case HomeMenuAction::ContinueReading:
+    case HomeMenuAction::ReadingStats:
+    case HomeMenuAction::Bookmarks:
+      return HomeMenuItem::NONE;
+  }
+  return HomeMenuItem::NONE;
+}
+
 HomeMenuAction homeActionForInitialMenuItem(HomeMenuItem item) {
   switch (item) {
     case HomeMenuItem::FILE_BROWSER:
@@ -959,6 +983,15 @@ void HomeActivity::onEnter() {
 
   if (isCarouselTheme && hasValidCarouselDiskCache(recentBooks, renderer, getHighlightedBookIndex())) {
     preRenderCarouselFrames();
+  }
+
+  // Back from a screen the menu opened returns to the menu, on that entry. Home's other
+  // ways into the same screens (a shelf link into the catalog) still return to Home.
+  const HomeMenuItem menuReturn = activityManager.takeHomeMenuReturn();
+  if (menuReturn != HomeMenuItem::NONE && menuReturn == initialMenuItem && usesMinimalHomeInteraction()) {
+    lastMinimalMenuAction = homeActionForInitialMenuItem(menuReturn);  // a restart on the way lost it
+    openMinimalMenu();
+    return;
   }
 
   requestUpdate();
@@ -1770,8 +1803,10 @@ void HomeActivity::loop() {
       }
 
       auto activateMinimalMenuAction = [this, &menuItems]() {
-        lastMinimalMenuAction = menuItems[minimalMenuIndex].action;
-        switch (menuItems[minimalMenuIndex].action) {
+        const HomeMenuAction action = menuItems[minimalMenuIndex].action;
+        lastMinimalMenuAction = action;
+        activityManager.setHomeMenuReturn(initialMenuItemForHomeAction(action));
+        switch (action) {
           case HomeMenuAction::BrowseFiles:
             onFileBrowserOpen();
             break;
