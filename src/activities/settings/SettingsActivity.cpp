@@ -56,6 +56,7 @@
 #include "components/UiAppHelpers.h"
 #include "components/icons/frontlightHeaderIcons.h"
 #include "fontIds.h"
+#include "network/HomeWifi.h"
 #include "util/BatteryUsage.h"
 #include "util/DevicePinStore.h"
 #include "util/DictionaryRegistry.h"
@@ -1239,9 +1240,10 @@ void SettingsActivity::toggleCurrentSetting() {
         startActivityForResult(std::make_unique<WifiSelectionActivity>(renderer, mappedInput, false),
                                [](const ActivityResult&) {
                                  SETTINGS.saveToFile();
-                                 // Settings only manages credentials; no parent needs the connection.
                                  // Cancelled selections already stop WiFi in the picker.
                                  if (WiFi.getMode() == WIFI_MODE_NULL) return;
+                                 // With Wi-Fi at Home on, a network joined here stays up for Home.
+                                 if (HomeWifi::keepManualConnection()) return;
                                  WiFi.disconnect(false);
                                  delay(30);
                                  if (!WiFi.mode(WIFI_OFF)) {
