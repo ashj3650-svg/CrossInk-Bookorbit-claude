@@ -11,6 +11,7 @@
 #include <strings.h>
 
 #include <algorithm>
+#include <array>
 #include <atomic>
 #include <cctype>
 #include <cstdio>
@@ -185,17 +186,18 @@ bool fetchJson(const std::string& url, const JsonDocument& filter, JsonDocument&
   return !error && !wrongShape;
 }
 
-// Sections we can browse: direct book listings plus the
-// authors/series/collections/libraries/smart-scopes drill-down facets.
-constexpr const char* SUPPORTED_SECTIONS[] = {
-    "recent", "continue-reading", "all-books", "authors", "series", "collections", "libraries", "smart-scopes",
-};
+// The catalog root, in the order it shows them: two book listings and the series and
+// authors drill-down facets. The server's other sections (Recently added, libraries,
+// collections, smart scopes) are left out.
+constexpr const char* ROOT_SECTIONS[] = {"continue-reading", "all-books", "series", "authors"};
+constexpr int ROOT_SECTION_COUNT = static_cast<int>(sizeof(ROOT_SECTIONS) / sizeof(ROOT_SECTIONS[0]));
 
-bool isSupportedSection(const std::string& sectionId) {
-  for (const char* id : SUPPORTED_SECTIONS) {
-    if (sectionId == id) return true;
+// The section's place on the root, or -1 when the root leaves it out.
+int rootSectionRank(const char* sectionId) {
+  for (int i = 0; i < ROOT_SECTION_COUNT; i++) {
+    if (strcmp(sectionId, ROOT_SECTIONS[i]) == 0) return i;
   }
-  return false;
+  return -1;
 }
 }  // namespace
 
@@ -210,13 +212,18 @@ bool BookOrbitCatalogClient::fetchRootSections(std::vector<BookOrbitCatalogSecti
   JsonDocument doc;
   if (!fetchJson(url, filter, doc)) return false;
 
+  // Placed by rank rather than the server's order; a slot the server did not fill is dropped.
+  std::array<BookOrbitCatalogSection, ROOT_SECTION_COUNT> ranked;
   for (JsonObjectConst section : doc["sections"].as<JsonArrayConst>()) {
     const char* id = section["section"] | "";
-    if (!isSupportedSection(id)) continue;  // skip sections we don't support browsing
-    BookOrbitCatalogSection entry;
-    entry.id = id;
-    entry.title = std::string(section["title"] | id);
-    outSections.push_back(std::move(entry));
+    const int rank = rootSectionRank(id);
+    if (rank < 0 || !ranked[rank].id.empty()) continue;
+    ranked[rank].id = id;
+    ranked[rank].title = std::string(section["title"] | id);
+  }
+  outSections.reserve(ROOT_SECTION_COUNT);
+  for (auto& section : ranked) {
+    if (!section.id.empty()) outSections.push_back(std::move(section));
   }
   return true;
 }
@@ -346,16 +353,13 @@ bool BookOrbitCatalogClient::fetchCatalogCounts(BookOrbitCatalogCounts& outCount
   const std::string url =
       BOOKORBIT_STORE.getBaseUrl() + "/plugin/catalog/dashboard?section=" + std::string(WANT_TO_READ_SHELF);
   JsonDocument filter;
-  bookOrbitSetFilter(filter, R"({"browseCounts":{"libraries":true,"authors":true,"series":true,"collections":true,)"
-                             R"("smartScopes":true},"section":{"books":[{"formats":true}]}})");
+  bookOrbitSetFilter(filter,
+                     R"({"browseCounts":{"authors":true,"series":true},"section":{"books":[{"formats":true}]}})");
   JsonDocument doc;
   if (!fetchJson(url, filter, doc)) return false;
 
-  outCounts.libraries = doc["browseCounts"]["libraries"] | -1;
   outCounts.authors = doc["browseCounts"]["authors"] | -1;
   outCounts.series = doc["browseCounts"]["series"] | -1;
-  outCounts.collections = doc["browseCounts"]["collections"] | -1;
-  outCounts.smartScopes = doc["browseCounts"]["smartScopes"] | -1;
   JsonArrayConst shelf = doc["section"]["books"].as<JsonArrayConst>();
   if (!shelf.isNull()) {
     outCounts.wantToRead = 0;
@@ -366,7 +370,6 @@ bool BookOrbitCatalogClient::fetchCatalogCounts(BookOrbitCatalogCounts& outCount
   // Free the dashboard document before the next two requests' TLS sessions.
   doc.clear();
 
-  // "Recently added" lists the same books as "All books", in another order.
   outCounts.totalBooks = fetchBookTotal(sectionBookQuery("all-books"));
   outCounts.inProgress = fetchBookTotal(sectionBookQuery("continue-reading"));
   return true;

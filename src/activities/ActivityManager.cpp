@@ -1070,6 +1070,7 @@ void ActivityManager::goToReader(std::string path, const bool suppressBackReleas
   // heap-backed strings. Home reloads them lazily when it becomes active.
   OPDS_STORE.release();
   BookOrbitHomeTiles::releaseCoverCache();
+  homeMenuReturn = HomeMenuItem::NONE;  // Home after a book is Home, not the menu
   replaceActivity(std::make_unique<ReaderActivity>(renderer, mappedInput, std::move(path), suppressBackRelease,
                                                    allowFastInitialRefresh, cleanImageBaseOnEntry));
 }

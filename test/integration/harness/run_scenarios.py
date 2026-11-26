@@ -1964,156 +1964,52 @@ def scenario_bookmark_recover_lost(verbose: bool) -> None:
         f"bookmarks deleted on the server: {sorted(set(received + [own]) - kept)}"
 
 
-def scenario_catalog_collections_browse(verbose: bool) -> None:
-    """The catalog browser lists the server's Collections section and the books
-    inside one. Driven entirely by scripted input (the catalog flow never
-    silent-reboots before exit), asserted through the list cache the browser
-    writes for each screen it loaded. Browse-only: nothing mutates server-side,
-    so this is repeatable as-is."""
-    manifest, _ = load_seed()
-    collection = manifest["collection"]
-
-    with tempfile.TemporaryDirectory(prefix="crossink-integ-") as tmp:
-        fs = SimFs(Path(tmp), manifest["kosync"])  # no open book: boots to home
-        script = ";".join([
-            "6000:DOWN", "6500:DOWN", "7000:CONFIRM",     # home menu -> BookOrbit catalog
-            "11000:DOWN", "11350:DOWN", "11700:DOWN",     # root -> Collections (4th row,
-            "12100:CONFIRM",                              #   after Libraries)
-            "14500:CONFIRM",                              # the seeded collection
-            "17500:QUIT",
-        ])
-        run_simulator(fs, input_script=script, choice="apply", timeout_s=60, verbose=verbose)
-
-        caches = [json.loads(p.read_text())
-                  for p in sorted((fs.crosspoint / "bookorbit_lists").glob("*.json"))]
-        roots = [c for c in caches if "sections" in c]
-        assert roots and any(s["id"] == "collections" for s in roots[0]["sections"]), \
-            f"Collections missing from the cached root: {roots}"
-        facets = [c for c in caches if "hasNext" in c]
-        assert any(i["title"] == collection["name"] for c in facets for i in c["items"]), \
-            f"collection list never loaded: {facets}"
-        books = [c for c in caches if "total" in c and "sections" not in c]
-        assert books, "collection books were never listed"
-        listed = {b["title"] for b in books[0]["items"]}
-        expected = {Path(b["file"]).stem for b in collection["books"]}
-        assert listed == expected, f"collection books mismatch: {listed} != {expected}"
-
-
 def scenario_catalog_empty_listing_back(verbose: bool) -> None:
-    """An empty listing (a collection with no books) shows the no-entries error,
-    and Back must climb out of it — the regression had the error screen's Back
-    reload the very listing it was showing, forever. Proven by navigating onward
-    after the error: Back lands on the row it left, the empty collection, and the
-    non-empty collection above it still opens with its books."""
+    """An empty listing (All books filtered to Finished, which the seed leaves empty)
+    shows the no-entries error, and Back must climb out of it -- the regression had the
+    error screen's Back reload the very listing it was showing, forever. Proven by
+    navigating onward after the error: Back lands on the root, whose first row,
+    Continue reading, still opens with its books."""
     manifest, _ = load_seed()
-    collection = manifest["collection"]
+    server = KosyncDevice(BASE_URL, manifest["kosync"]["username"],
+                          manifest["kosync"]["password"], SIM_DEVICE_ID)
+    # Guards on the fixture itself: the filter must come back empty, Continue reading not.
+    assert server.catalog_page(size=1, format="epub", readStatus="finished")["total"] == 0, \
+        "the seed marks a book finished: All books filtered to Finished is not empty"
+    reading_total = server.catalog_page(size=1, format="epub", readStatus="reading")["total"]
+    assert reading_total > 0, "the seed marks no book as being read"
 
     with tempfile.TemporaryDirectory(prefix="crossink-integ-") as tmp:
         fs = SimFs(Path(tmp), manifest["kosync"])  # no open book: boots to home
         script = ";".join([
             "6000:DOWN", "6500:DOWN", "7000:CONFIRM",     # home menu -> BookOrbit catalog
-            "11000:DOWN", "11350:DOWN", "11700:DOWN",     # root -> Collections (4th row,
-            "12100:CONFIRM",                              #   after Libraries)
-            "14500:DOWN", "14900:CONFIRM",                # Zero Shelf (empty) -> error screen
-            "17500:BACK",                                 # must climb back to the collection list,
-            "19100:UP",                                   #   on Zero Shelf's row
-            "19500:CONFIRM",                              # Integration Shelf -> its books
-            "22500:QUIT",
+            "11000:DOWN", "11350:CONFIRM",                # root -> All books (2nd row)
+            "14500:RIGHT",                                # filter picker, on All
+            "15000:DOWN", "15400:DOWN", "15800:DOWN",     # -> Finished: empty -> error screen
+            "16200:CONFIRM",
+            "19500:BACK",                                 # must climb back to the root,
+            "21400:CONFIRM",                              #   on its first row: Continue reading
+            "24500:QUIT",
         ])
         run_simulator(fs, input_script=script, choice="apply", timeout_s=60, verbose=verbose)
 
         caches = [json.loads(p.read_text())
                   for p in sorted((fs.crosspoint / "bookorbit_lists").glob("*.json"))]
-        books = [c for c in caches if "total" in c and "sections" not in c]
-        assert any(c["total"] == 0 for c in books), "the empty collection was never opened"
-        expected = {Path(b["file"]).stem for b in collection["books"]}
-        assert any({i["title"] for i in c["items"]} == expected for c in books), \
-            "navigation after the empty-listing error never reached the collection's books"
-
-
-def scenario_catalog_libraries_browse(verbose: bool) -> None:
-    """Libraries is a browsable root section, like BookOrbit's own KOReader
-    plugin: its listing carries each library's book count, and opening one lists
-    that library's books (the query carries the library id in its cache key).
-    Also proves the root's section counts: the dashboard fetch is cached with
-    the listings. The seed has a single library holding every book."""
-    manifest, books = load_seed()
-
-    with tempfile.TemporaryDirectory(prefix="crossink-integ-") as tmp:
-        fs = SimFs(Path(tmp), manifest["kosync"])  # no open book: boots to home
-        script = ";".join([
-            "6000:DOWN", "6500:DOWN", "7000:CONFIRM",  # home menu -> BookOrbit catalog
-            "11000:DOWN", "11350:DOWN",                # root -> Libraries (3rd row)
-            "11700:CONFIRM",
-            "14000:CONFIRM",                           # the seeded library -> its books
-            "17000:QUIT",
-        ])
-        run_simulator(fs, input_script=script, choice="apply", timeout_s=60, verbose=verbose)
-
-        caches = [json.loads(p.read_text())
-                  for p in sorted((fs.crosspoint / "bookorbit_lists").glob("*.json"))]
-        counts = [c for c in caches if "totalBooks" in c]
-        assert counts and counts[0]["totalBooks"] == len(books), \
-            f"section counts never cached or wrong: {counts}"
-        assert counts[0]["collections"] == 2, f"collections count wrong: {counts[0]}"
-        facets = [c for c in caches if "hasNext" in c]
-        library_rows = [i for c in facets for i in c["items"] if i["title"] == "Integration"]
-        assert library_rows, f"the libraries listing never loaded: {facets}"
-        # The per-library count comes from the server and covers every format, so
-        # it includes the seeded audiobook-only book the listing itself hides.
-        assert library_rows[0]["count"] == len(books) + 1, \
-            f"library book count wrong: {library_rows[0]['count']} != {len(books) + 1}"
-        scoped = [c for c in caches if c.get("key", "").split("|")[-1] != "" and "total" in c]
-        assert scoped, "no book listing was fetched with a libraryId"
-        assert scoped[0]["total"] == len(books), \
-            f"library books total wrong: {scoped[0]['total']} != {len(books)}"
-
-
-def scenario_catalog_smart_scopes_browse(verbose: bool) -> None:
-    """SmartScopes is a browsable root section, like BookOrbit's own KOReader
-    plugin: its listing names each scope, and opening one lists the books the
-    scope resolves to (the query carries the scope id in its cache key). The
-    seeded scope selects the Integration Shelf's members, so its books are the
-    collection's -- reached through a saved server-side filter rather than
-    through collection membership."""
-    manifest, _ = load_seed()
-    scope = manifest["smart_scope"]
-
-    with tempfile.TemporaryDirectory(prefix="crossink-integ-") as tmp:
-        fs = SimFs(Path(tmp), manifest["kosync"])  # no open book: boots to home
-        script = ";".join([
-            "6000:DOWN", "6500:DOWN", "7000:CONFIRM",     # home menu -> BookOrbit catalog
-            "11000:DOWN", "11350:DOWN", "11700:DOWN",     # root -> SmartScopes (5th row,
-            "12050:DOWN", "12400:CONFIRM",                #   after Collections)
-            "14500:CONFIRM",                              # the seeded scope -> its books
-            "17500:QUIT",
-        ])
-        run_simulator(fs, input_script=script, choice="apply", timeout_s=60, verbose=verbose)
-
-        caches = [json.loads(p.read_text())
-                  for p in sorted((fs.crosspoint / "bookorbit_lists").glob("*.json"))]
-        roots = [c for c in caches if "sections" in c]
-        assert roots and any(s["id"] == "smart-scopes" for s in roots[0]["sections"]), \
-            f"SmartScopes missing from the cached root: {roots}"
-        counts = [c for c in caches if "totalBooks" in c]
-        assert counts and counts[0]["smartScopes"] == 1, \
-            f"the root's SmartScopes count is wrong: {counts}"
-        facets = [c for c in caches if "hasNext" in c]
-        assert any(i["title"] == scope["name"] for c in facets for i in c["items"]), \
-            f"the SmartScopes listing never loaded: {facets}"
-        books = [c for c in caches if "total" in c and "sections" not in c]
-        assert books, "the scope's books were never listed"
-        listed = {b["title"] for b in books[0]["items"]}
-        expected = {Path(b["file"]).stem for b in scope["books"]}
-        assert listed == expected, f"SmartScope books mismatch: {listed} != {expected}"
-
+        # Book cache keys are books|page|sort|readStatus|...
+        listings = {tuple(c["key"].split("|")[2:4]): c for c in caches
+                    if c.get("key", "").startswith("books|")}
+        finished = listings.get(("title", "finished"))
+        assert finished and finished["total"] == 0, f"the empty listing was never opened: {sorted(listings)}"
+        reading = listings.get(("recently_read", "reading"))
+        assert reading and reading["total"] == reading_total, \
+            f"navigation after the empty-listing error never reached Continue reading: {sorted(listings)}"
 
 def scenario_catalog_hides_non_epub(verbose: bool) -> None:
     """The catalog lists only books it can download: the audiobook-only record,
     which shares an EPUB's title and author, is absent, while the book holding
     both an EPUB and an audio file stays. The seed uploads the audiobook after
     the library and marks it as being read, so an unfiltered listing would show
-    it first in Recently added and among Continue reading. The root's two book
+    it among Continue reading. The root's two book
     counts must match those EPUB listings, not the dashboard's all-format
     totals, and Continue reading lists only the books being read."""
     manifest, _ = load_seed()
@@ -2134,7 +2030,7 @@ def scenario_catalog_hides_non_epub(verbose: bool) -> None:
             "6000:DOWN", "6500:DOWN", "7000:CONFIRM",  # home menu -> BookOrbit catalog
             "11000:CONFIRM",                           # root -> Continue reading (1st row)
             "14000:BACK",                              # back to the root
-            "16000:DOWN", "16350:CONFIRM",             # Recently added (2nd row)
+            "16000:DOWN", "16350:CONFIRM",             # All books (2nd row)
             "19500:QUIT",
         ])
         run_simulator(fs, input_script=script, choice="apply", timeout_s=60, verbose=verbose)
@@ -2152,16 +2048,16 @@ def scenario_catalog_hides_non_epub(verbose: bool) -> None:
         listings = {tuple(c["key"].split("|")[2:4]): c for c in caches
                     if c.get("key", "").startswith("books|")}
         reading = listings.get(("recently_read", "reading"))
-        recent = listings.get(("recently_added", ""))
+        all_books = listings.get(("title", ""))
         assert reading, f"Continue reading never listed with readStatus=reading: {sorted(listings)}"
-        assert recent, f"Recently added was never listed: {sorted(listings)}"
+        assert all_books, f"All books was never listed: {sorted(listings)}"
         assert reading["total"] == reading_total, \
             f"Continue reading total {reading['total']} != {reading_total}"
-        assert recent["total"] == epub_total, f"Recently added total {recent['total']} != {epub_total}"
+        assert all_books["total"] == epub_total, f"All books total {all_books['total']} != {epub_total}"
 
         reading_ids = {i["id"] for i in reading["items"]}
-        recent_ids = {i["id"] for i in recent["items"]}
-        assert non_epub["audiobook_id"] not in reading_ids | recent_ids, \
+        all_ids = {i["id"] for i in all_books["items"]}
+        assert non_epub["audiobook_id"] not in reading_ids | all_ids, \
             f"the audiobook-only {non_epub['audiobook_title']!r} is listed"
         assert non_epub["mixed_id"] in reading_ids, \
             f"the EPUB+audio {non_epub['mixed_title']!r} is missing from Continue reading"
@@ -2183,9 +2079,7 @@ def scenario_catalog_download_naming(verbose: bool) -> None:
         fs = SimFs(Path(tmp), manifest["kosync"], download_folder="/Downloads")
         script = first_book_script = ";".join([
             "6000:DOWN", "6500:DOWN", "7000:CONFIRM",     # home menu -> BookOrbit catalog
-            "11000:DOWN", "11350:DOWN", "11700:DOWN",     # root -> All books (8th row,
-            "12050:DOWN", "12400:DOWN", "12750:DOWN",     #   after the facet sections,
-            "13100:DOWN",                                 #   SmartScopes among them)
+            "11000:DOWN",                                 # root -> All books (2nd row)
             "13450:CONFIRM",
             "16000:CONFIRM",                              # first book -> download
             "24000:QUIT",                                 # only reached if no restart dropped it
@@ -2233,18 +2127,7 @@ def scenario_catalog_download_naming(verbose: bool) -> None:
         assert index == [(first["id"], f"/Downloads/{device_path}", expected.stat().st_size)], \
             f"download index does not record the download: {index}"
 
-        # Second run on the same card: the offline "On device" category must still
-        # find the book now that the template filed it two folders deep. The catalog
-        # root counts it on entry, which is where the scan reports what it found.
-        script = ";".join([
-            "6000:DOWN", "6500:DOWN", "7000:CONFIRM",  # home menu -> BookOrbit catalog
-            "13000:QUIT",                              # the root counts local books as it builds
-        ])
-        output = run_simulator(fs, input_script=script, choice="apply", timeout_s=60, verbose=verbose)
-        assert "Local scan: kind=on-device count=1" in output, \
-            "'On device' did not find the downloaded book inside the template's folders"
-
-        # Third run: the same file, as another app or a copy over USB would leave it at the
+        # Second run: the same file, as another app or a copy over USB would leave it at the
         # template's path, unknown to the index (here a full one of other books), so its row
         # is not marked. Confirm finds it through the book's details and opens it (a PSRAM
         # profile only marks it) rather than downloading it again, and the index records it
@@ -2269,53 +2152,6 @@ def scenario_catalog_download_naming(verbose: bool) -> None:
             assert state.get("openEpubPath") == book_path, "Confirm did not open the copy in place"
 
 
-def scenario_catalog_large_local_list(verbose: bool) -> None:
-    """"On device" lists a card past the 200 rows it used to stop at: 135 books in a series
-    folder known only through the download index, one indexed book in the download folder
-    itself (listed once), and the rest copied flat into the download folder, /Read and the
-    SD root, 210 in all. The root counts them; the list opens on its first page, Up from the
-    top wraps to the last row by opening the last page, Down wraps back to the first, and the
-    row window never holds more than three pages. Confirm on the last row opens Book 210,
-    which only a natural sort puts there, after Book 21; its list files are gone with it."""
-    manifest, library = load_seed()
-    with tempfile.TemporaryDirectory(prefix="crossink-integ-") as tmp:
-        fs = SimFs(Path(tmp), manifest["kosync"], download_folder="/Downloads")
-        indexed = []
-        for number in range(210, 0, -1):
-            folder = "Downloads/Series" if number <= 135 else ("Read", "Downloads", "")[number % 3]
-            book = fs.fs / folder / f"Book {number}.epub"
-            book.parent.mkdir(parents=True, exist_ok=True)
-            if number == 210:  # the one the run opens
-                shutil.copyfile(INTEGRATION / "library" / library[0]["file"], book)
-            else:
-                book.write_bytes(b"EPUB placeholder")
-            if number <= 136:
-                indexed.append((number, "/" + book.relative_to(fs.fs).as_posix(), book.stat().st_size))
-        write_download_index(fs.fs / DOWNLOAD_INDEX, indexed, version=2)
-
-        script = ";".join([
-            "6000:DOWN", "6500:DOWN", "7000:CONFIRM",             # home menu -> BookOrbit catalog
-            "11500:UP", "11900:UP", "12300:UP", "12700:CONFIRM",  # root, from its first row -> On device
-            "15500:UP",                                           # wrap to the last row
-            "16000:DOWN",                                         # wrap back to the first
-            "16500:UP", "17000:CONFIRM",                          # last row -> open it
-            "24000:QUIT",                                         # only reached if it did not open
-        ])
-        output = run_simulator(fs, input_script=script, choice="apply", timeout_s=60, verbose=verbose,
-                               after_reboot_script="6000:QUIT")
-        assert "Local scan: kind=on-device count=210" in output, "the root did not count all 210 books once"
-        pages = [(int(page), int(rows)) for page, rows in
-                 re.findall(r"On device page (\d+): (\d+) rows in memory", output)]
-        # Page 10 may come in front of the last page, which holds less than a screen.
-        assert [page for page, _ in pages if page != 10] == [1, 11, 1, 11], f"unexpected page loads: {pages}"
-        assert max(rows for _, rows in pages) <= 60, f"the row window grew past three pages: {pages}"
-        state = json.loads((fs.crosspoint / "state.json").read_text())
-        assert state.get("openEpubPath") == "/Read/Book 210.epub", \
-            f"the last row is not Book 210: {state.get('openEpubPath')}"
-        leftovers = sorted(p.name for p in fs.crosspoint.glob("bookorbit_local.*"))
-        assert not leftovers, f"the list's files outlived it: {leftovers}"
-
-
 def scenario_catalog_book_actions(verbose: bool) -> None:
     """A catalog book's action menu, opened by holding Confirm, and what Confirm does
     once the book is on the device. Four runs on one card, each on the first book of
@@ -2328,9 +2164,7 @@ def scenario_catalog_book_actions(verbose: bool) -> None:
                        manifest["kosync"]["password"], SIM_DEVICE_ID)
     to_all_books = [
         "6000:DOWN", "6500:DOWN", "7000:CONFIRM",     # home menu -> BookOrbit catalog
-        "11000:DOWN", "11350:DOWN", "11700:DOWN",     # root -> All books (8th row)
-        "12050:DOWN", "12400:DOWN", "12750:DOWN",
-        "13100:DOWN",
+        "11000:DOWN",                                 # root -> All books (2nd row)
         "13450:CONFIRM",
     ]
     hold_first_book = "16000:CONFIRM:1500"  # past the 1 s threshold: opens the menu
@@ -2432,9 +2266,7 @@ def scenario_catalog_deep_listing(verbose: bool) -> None:
         presses = [f"{16000 + i * 400}:DOWN" for i in range(72)]
         script = ";".join([
             "6000:DOWN", "6500:DOWN", "7000:CONFIRM",     # home menu -> BookOrbit catalog
-            "11000:DOWN", "11350:DOWN", "11700:DOWN",     # root -> All books (8th row)
-            "12050:DOWN", "12400:DOWN", "12750:DOWN",
-            "13100:DOWN",
+            "11000:DOWN",                                 # root -> All books (2nd row)
             "13450:CONFIRM",
             *presses,
             "46000:CONFIRM",                              # the selected book -> download
@@ -2515,9 +2347,7 @@ def scenario_catalog_sort_filter(verbose: bool) -> None:
         fs = SimFs(Path(tmp), manifest["kosync"], download_folder="/Downloads")
         script = ";".join([
             "6000:DOWN", "6500:DOWN", "7000:CONFIRM",     # home menu -> BookOrbit catalog
-            "11000:DOWN", "11350:DOWN", "11700:DOWN",     # root -> All books (8th row)
-            "12050:DOWN", "12400:DOWN", "12750:DOWN",
-            "13100:DOWN",
+            "11000:DOWN",                                 # root -> All books (2nd row)
             "13450:CONFIRM",
             "16500:LEFT",                                 # sort picker, on Title
             "17000:UP", "17400:CONFIRM",                  # -> Date Added, newest first
@@ -2571,8 +2401,7 @@ WANT_TO_READ_BOOKS = (60, 61)  # library indices outside every seeded range
 def scenario_catalog_sections_and_shelf(verbose: bool) -> None:
     """The data behind the catalog's list sections and its Want to Read shelf. All
     books (sorted by title) keeps, with its first page, where each letter starts, as
-    the server ranks it; Recently added keeps each book's date added for its day
-    headings. Two books marked want to read put a Want to Read row after the server's
+    the server ranks it. Two books marked want to read put a Want to Read row after the server's
     sections, which lists the server's own shelf. The headings themselves are drawn
     from this data and are checked on screen, not here."""
     manifest, books = load_seed()
@@ -2598,16 +2427,11 @@ def scenario_catalog_sections_and_shelf(verbose: bool) -> None:
         fs = SimFs(Path(tmp), manifest["kosync"])  # no open book: boots to home
         script = ";".join([
             "6000:DOWN", "6500:DOWN", "7000:CONFIRM",     # home menu -> BookOrbit catalog
-            "13000:DOWN", "13400:CONFIRM",                # Recently added (2nd row)
-            "16500:BACK",
-            "18500:DOWN", "18850:DOWN", "19200:DOWN",     # root -> All books (8th row)
-            "19550:DOWN", "19900:DOWN", "20250:DOWN",
-            "20600:DOWN", "20950:CONFIRM",
-            "24000:BACK",
-            "26000:DOWN", "26350:DOWN", "26700:DOWN",     # root -> Want to Read (9th row)
-            "27050:DOWN", "27400:DOWN", "27750:DOWN",
-            "28100:DOWN", "28450:DOWN", "28800:CONFIRM",
-            "32000:QUIT",
+            "13000:DOWN", "13400:CONFIRM",                # root -> All books (2nd row)
+            "17000:BACK",
+            "19000:DOWN", "19350:DOWN", "19700:DOWN",     # root -> Want to Read (5th row)
+            "20050:DOWN", "20400:CONFIRM",
+            "24000:QUIT",
         ])
         run_simulator(fs, input_script=script, choice="apply", timeout_s=60, verbose=verbose)
 
@@ -2622,9 +2446,6 @@ def scenario_catalog_sections_and_shelf(verbose: bool) -> None:
         assert by_title, f"All books was never listed: {sorted(listings)}"
         assert [[b["key"], b["index"]] for b in letters] == by_title.get("letters"), \
             f"letters {by_title.get('letters')} != the server's {letters}"
-        recent = listings.get(("1", "recently_added", "", "", ""))
-        assert recent and all(i.get("addedAt", 0) > 0 for i in recent["items"]), \
-            "Recently added rows carry no date added"
         listed = listings.get(("1", "", "", "", "want-to-read"))
         assert listed, f"the Want to Read shelf was never listed: {sorted(listings)}"
         assert [i["id"] for i in listed["items"]] == shelf_ids, \
@@ -2861,48 +2682,33 @@ def scenario_home_refresh_device_scan(verbose: bool) -> None:
         assert not any(copy.exists() for copy in copies), "a copy stayed in /Inbox"
 
 
-CATALOG_ROOT_SCRIPT = ";".join([
+CATALOG_ALL_BOOKS_SCRIPT = ";".join([
     "6000:DOWN", "6500:DOWN", "7000:CONFIRM",  # home menu -> BookOrbit catalog
-    "13000:QUIT",                              # the root counts local books as it builds
+    "11000:DOWN", "11350:CONFIRM",             # root -> All books (2nd row): each row's
+    "15000:QUIT",                              #   on-device check reads the index
 ])
 
 
 def scenario_catalog_download_index_migration(verbose: bool) -> None:
-    """An index written by an earlier release (BOD1) is converted on the first catalog
-    visit: the books it lists, filed in series folders the flat scan never visits, are
-    still counted under "On device", and the card now holds the same entries as BOD2
-    with no temporary or backup file left behind."""
+    """An index written by an earlier release (BOD1) is converted the first time the
+    catalog reads it: the books it lists, filed in series folders no scan visits, are
+    all kept, and the card now holds the same entries as BOD2 with no temporary or
+    backup file left behind."""
     manifest, _ = load_seed()
     with tempfile.TemporaryDirectory(prefix="crossink-integ-") as tmp:
         fs = SimFs(Path(tmp), manifest["kosync"], download_folder="/Downloads")
         entries = seed_nested_books(fs, 3)
         write_download_index(fs.fs / DOWNLOAD_INDEX, entries, version=1)
 
-        output = run_simulator(fs, input_script=CATALOG_ROOT_SCRIPT, choice="apply",
+        output = run_simulator(fs, input_script=CATALOG_ALL_BOOKS_SCRIPT, choice="apply",
                                timeout_s=60, verbose=verbose)
-        assert "Local scan: kind=on-device count=3" in output, \
-            "'On device' lost the books listed by the BOD1 index"
+        assert "Migrated 3 download index entries to v2" in output, \
+            "the BOD1 index was not converted with all its books"
         assert read_download_index(fs.fs / DOWNLOAD_INDEX) == entries, \
             "the migrated index does not hold the BOD1 entries"
         leftovers = sorted(p.name for p in fs.crosspoint.glob("bookorbit_downloads.*")
                            if p.suffix != ".bin")
         assert not leftovers, f"the index rewrite left files behind: {leftovers}"
-
-
-def scenario_catalog_download_index_beyond_legacy_cap(verbose: bool) -> None:
-    """The index now keeps more than the 128 downloads BOD1 was capped at: 150 books
-    in series folders, known only through the index, are all counted under "On
-    device". Before the compact index, the oldest 22 were evicted and went missing."""
-    manifest, _ = load_seed()
-    with tempfile.TemporaryDirectory(prefix="crossink-integ-") as tmp:
-        fs = SimFs(Path(tmp), manifest["kosync"], download_folder="/Downloads")
-        entries = seed_nested_books(fs, 150)
-        write_download_index(fs.fs / DOWNLOAD_INDEX, entries, version=2)
-
-        output = run_simulator(fs, input_script=CATALOG_ROOT_SCRIPT, choice="apply",
-                               timeout_s=60, verbose=verbose)
-        assert "Local scan: kind=on-device count=150" in output, \
-            "'On device' did not count every book the index lists"
 
 
 def rewrite_book_file(manifest: dict, book: dict) -> None:
@@ -3302,16 +3108,11 @@ def scenario_series_next_download(verbose: bool) -> None:
 
 
 SCENARIOS = {
-    "catalog_collections_browse": scenario_catalog_collections_browse,
     "catalog_empty_listing_back": scenario_catalog_empty_listing_back,
-    "catalog_libraries_browse": scenario_catalog_libraries_browse,
-    "catalog_smart_scopes_browse": scenario_catalog_smart_scopes_browse,
     "catalog_download_naming": scenario_catalog_download_naming,
     "catalog_book_actions": scenario_catalog_book_actions,
     "catalog_deep_listing": scenario_catalog_deep_listing,
     "catalog_download_index_migration": scenario_catalog_download_index_migration,
-    "catalog_download_index_beyond_legacy_cap": scenario_catalog_download_index_beyond_legacy_cap,
-    "catalog_large_local_list": scenario_catalog_large_local_list,
     "sleep_sync_device_scan": scenario_sleep_sync_device_scan,
     "home_refresh_device_scan": scenario_home_refresh_device_scan,
     "catalog_hides_non_epub": scenario_catalog_hides_non_epub,

@@ -97,6 +97,7 @@ class ActivityManager {
   // is intentionally not persisted as recent-book order.
   std::string preferredHomeBookPath;
   bool returningHomeThroughSettings = false;
+  HomeMenuItem homeMenuReturn = HomeMenuItem::NONE;
 
   // Task to render and display the activity
   TaskHandle_t renderTaskHandle = nullptr;
@@ -198,6 +199,16 @@ class ActivityManager {
   bool openReaderMenuFromShortcut();
   bool handleShortcutAction(uint8_t action);
   bool hasActivityNamed(const char* activityName) const;
+  // The Home menu entry whose screen replaced Home: Back from that screen reopens the
+  // menu on it (see HomeActivity::onEnter()). Opening a book forgets it, and a silent
+  // restart to Home, such as the one leaving the BookOrbit catalog, carries it.
+  void setHomeMenuReturn(HomeMenuItem item) { homeMenuReturn = item; }
+  HomeMenuItem pendingHomeMenuReturn() const { return homeMenuReturn; }
+  HomeMenuItem takeHomeMenuReturn() {
+    const HomeMenuItem item = homeMenuReturn;
+    homeMenuReturn = HomeMenuItem::NONE;
+    return item;
+  }
 #ifdef SIMULATOR
   bool isCurrentActivityNamed(const char* activityName) const;
   Activity* simulatorCurrentActivity() const { return currentActivity.get(); }

@@ -145,24 +145,6 @@ TEST_F(BookOrbitDownloadIndexTest, EvictsOldestPastTheCap) {
   EXPECT_EQ(lookup(static_cast<int64_t>(MAX_ENTRIES)), bookPath(static_cast<int>(MAX_ENTRIES)));
 }
 
-TEST_F(BookOrbitDownloadIndexTest, ForEachExistingSkipsMissingBooks) {
-  for (int i = 1; i <= 3; i++) {
-    putBook(bookPath(i), 100 * i);
-    BookOrbitDownloadIndex::record(i, bookPath(i));
-  }
-  Storage.remove(bookPath(2).c_str());
-
-  std::vector<std::pair<int64_t, std::string>> seen;
-  BookOrbitDownloadIndex::forEachExisting(
-      [](const int64_t bookId, const std::string& path, void* context) {
-        static_cast<std::vector<std::pair<int64_t, std::string>>*>(context)->emplace_back(bookId, path);
-      },
-      &seen);
-
-  const std::vector<std::pair<int64_t, std::string>> expected = {{1, bookPath(1)}, {3, bookPath(3)}};
-  EXPECT_EQ(seen, expected);
-}
-
 TEST_F(BookOrbitDownloadIndexTest, MigratesVersion1) {
   putBook(bookPath(1), 100);
   putBook(bookPath(2), 200);
