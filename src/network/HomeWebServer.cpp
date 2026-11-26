@@ -10,10 +10,11 @@
 #include <memory>
 
 #include "network/CrossPointWebServer.h"
+#include "network/WifiUtils.h"
 
 namespace {
-// The name File Transfer announces too: http://crosspoint.local/
-constexpr const char* HOSTNAME = "crosspoint";
+// The name File Transfer announces too: http://ashadsbook.local/
+constexpr const char* HOSTNAME = DEVICE_MDNS_NAME;
 // Requests served per main-loop pass, as File Transfer serves a batch per pass.
 constexpr int REQUESTS_PER_PASS = 8;
 

@@ -50,7 +50,7 @@ These come with v1.6.1+bookorbit.10 and later. The [changelog](CHANGELOG.md) has
 
 ### BookOrbit and Wi-Fi (X4 Classic, X4 Pro and reTerminal Sticky)
 
-- **Wi-Fi at Home** — Wi-Fi joins your network while Home shows and goes off in a book, on sleep, or after 10 idle minutes. Settings → System → Wi-Fi at Home.
+- **Wi-Fi at Home** — Wi-Fi joins your network while Home shows and goes off in a book, on sleep, or after 10 idle minutes. A network you join by hand in Settings → System → Wi-Fi Networks stays connected too. The web page answers at http://ashadsbook.local/. Settings → System → Wi-Fi at Home.
 - **Sync on open** — opening a book with Wi-Fi at Home connected first fetches its latest BookOrbit position.
 - **Sleep sync for recent books** — the sync behind the sleep screen covers up to 10 recent books, and the most recently saved position wins.
 - **Download Missing Books** — the sleep sync downloads every book of your BookOrbit library that is not on the card, newest first (Settings → BookOrbit Sync). A book you delete from the card stays deleted. It stops when the card is nearly full or the battery is below 15%. The **New on your reader** Home shelf lists the newest ones you have not opened yet.
@@ -72,6 +72,7 @@ Index ahead, Next page ready and covers from memory need the extra memory of the
 - **Device PIN** — Settings → System → Device → Device PIN sets a four-digit, numbers-only PIN asked for each time the reader is turned on or woken. On the PIN screen, Up/Right and Down/Left change the highlighted digit, Confirm moves on (and checks the PIN after the fourth digit), Back steps back. Forgot it? Delete `.crosspoint/device_pin.bin` from the SD card on a computer. The PIN locks the reader's screens; it does not encrypt the card.
 - **Search** — the BookOrbit Home's Search button (Up from the current book) opens the Library on its search keyboard; in the Library, Right is Search. Searches match titles, authors and series.
 - **Battery Use** — Settings → System → Device → Battery Use shows the drain asleep (per day), awake (per hour) and per sleep sync.
+- **Ashad's Books** — the boot screen and the plain sleep screen show "Ashad's Books" with an open book logo, and the reader is called ashadsbook on your network (http://ashadsbook.local/, AshadsBook-… in the router's list).
 
 ---
 
