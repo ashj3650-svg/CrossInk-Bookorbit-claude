@@ -1,7 +1,14 @@
 #pragma once
+#include <chrono>
 #include <cstddef>
 #include <cstdio>
 #include <utility>
+
+// The device's HalStorage.h brings in Arduino.h, and with it millis().
+inline unsigned long millis() {
+  using namespace std::chrono;
+  return static_cast<unsigned long>(duration_cast<milliseconds>(steady_clock::now().time_since_epoch()).count());
+}
 
 inline size_t storageReadCalls = 0;
 inline size_t storageReadBytes = 0;
@@ -47,6 +54,7 @@ class HalFile {
     storageReadBytes += got;
     return got;
   }
+  size_t write(const void* bytes, size_t count) { return file ? std::fwrite(bytes, 1, count, file) : 0; }
 };
 inline struct StorageStub {
   bool openFileForRead(const char*, const char* path, HalFile& file) {
@@ -55,4 +63,17 @@ inline struct StorageStub {
     if (file.file) ++openStorageFiles;
     return file.file;
   }
+  bool openFileForWrite(const char*, const char* path, HalFile& file) {
+    file.close();
+    file.file = std::fopen(path, "wb");
+    if (file.file) ++openStorageFiles;
+    return file.file;
+  }
+  bool exists(const char* path) {
+    std::FILE* f = std::fopen(path, "rb");
+    if (!f) return false;
+    std::fclose(f);
+    return true;
+  }
+  bool remove(const char* path) { return std::remove(path) == 0; }
 } Storage;
