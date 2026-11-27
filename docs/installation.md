@@ -24,9 +24,10 @@ arrive over the air. Turn on `Settings > System > Include Release Candidates` to
 offered the test builds published ahead of each release as well.
 
 > **Ashad's Books build:** this copy of the firmware adds its own features on top of
-> CrossInk-Bookorbit (see the [README](../README.md)). Check for Updates still offers the
-> CrossInk-Bookorbit releases above, which do not have them, so install updates of this
-> build by flashing its `.bin` instead.
+> CrossInk-Bookorbit (see the [README](../README.md)) and has no Check for Updates or
+> Include Release Candidates, which would install the CrossInk-Bookorbit releases above.
+> Install updates of this build from its `.bin`: `Settings > System > SD Card Firmware
+> Update`, or over USB.
 
 ## Web Installation via USB
 

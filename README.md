@@ -338,7 +338,7 @@ It also decides how faithful your uploaded reading-session timestamps are — se
 
 Download the `firmware-*.bin` for your device from **this repository's** [releases page](https://github.com/agosez/CrossInk-Bookorbit/releases) — not upstream's, which does not include BookOrbit support. CrossInk's own web installer only offers upstream builds, so flash the file as a custom firmware with the [CrossPoint flash tools](https://crosspointreader.com/#flash-tools), from the command line, or from the SD card — [Installation](./docs/installation.md) walks through each path, including USB-locked devices and reverting to upstream CrossInk.
 
-**Settings → System → Check for Updates** looks at CrossInk-Bookorbit's releases, which do not have this fork's extras: installing one of those replaces this firmware with theirs. Update this fork by flashing its own `.bin` over USB or from the SD card instead.
+This fork has no **Check for Updates** in Settings → System: it would install CrossInk-Bookorbit's releases, which do not have this fork's extras. Update by copying this fork's `.bin` to the SD card and choosing **Settings → System → SD Card Firmware Update**, or by flashing it over USB.
 
 ### Languages
 
