@@ -124,6 +124,14 @@ class ButtonShortcutController {
     sideUpUnlock_ = {};
     sideDownUnlock_ = {};
   }
+  // Unlocked, as a fresh boot starts. For a wake that carries on without one (Instant Wake).
+  void resetQuickLock() {
+    quickLockState_ = {};
+    quickLockTrigger_ = QuickLockTrigger::None;
+    unlockTriggerReleased_ = true;
+    sideUpUnlock_ = {};
+    sideDownUnlock_ = {};
+  }
   bool tryUnlockSide(uint32_t nowMs, bool upPressed, bool upPressEdge, bool upReleaseEdge, bool upHasLongAction,
                      bool downPressed, bool downPressEdge, bool downReleaseEdge, bool downHasLongAction,
                      uint32_t longPressMs) {

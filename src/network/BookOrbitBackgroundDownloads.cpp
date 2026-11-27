@@ -7,6 +7,7 @@
 #include <freertos/semphr.h>
 #include <freertos/task.h>
 
+#include <algorithm>
 #include <atomic>
 #include <deque>
 #include <utility>
@@ -193,10 +194,9 @@ int BookOrbitBackgroundDownloads::progressOf(const int64_t bookId) {
   if (!stateMutex) return -1;
   const StateLock lock;
   if (activeBookId.load() == bookId) return activePercent.load();
-  for (const Request& request : waiting) {
-    if (request.bookId == bookId) return 0;
-  }
-  return -1;
+  const bool queued = std::any_of(waiting.begin(), waiting.end(),
+                                  [bookId](const Request& request) { return request.bookId == bookId; });
+  return queued ? 0 : -1;
 }
 
 bool BookOrbitBackgroundDownloads::busy() {

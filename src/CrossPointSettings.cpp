@@ -1253,6 +1253,12 @@ unsigned long CrossPointSettings::getSleepTimeoutMs() const {
   return static_cast<unsigned long>(minutes) * 60UL * 1000UL;
 }
 
+uint8_t CrossPointSettings::getInstantWakeMinutes() const {
+  // A hand-edited settings file can hold any value: round down to a step, within range.
+  const uint8_t minutes = std::min(instantWakeMinutes, MAX_INSTANT_WAKE_MINUTES);
+  return static_cast<uint8_t>(minutes - minutes % INSTANT_WAKE_MINUTES_STEP);
+}
+
 #ifdef SIMULATOR
 bool CrossPointSettings::verifySleepTimeoutMigrationContract() {
   CrossPointSettings& settings = getInstance();

@@ -66,6 +66,8 @@ bool sameSlot(const CachedCover& cover, const char* path, const Rect& slot, cons
 }  // namespace
 
 void BookOrbitHomeTiles::releaseCoverCache() {
+  // CachedCover owns its pixels and cannot be copied, which std::fill would need.
+  // cppcheck-suppress useStlAlgorithm
   for (CachedCover& cover : gCoverCache) cover = CachedCover{};
 }
 

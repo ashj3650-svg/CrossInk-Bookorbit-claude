@@ -255,14 +255,12 @@ void DevicePinActivity::render(RenderLock&&) {
     for (int key = 0; key < KEY_COLUMNS * KEY_ROWS; key++) {
       const Rect rect = keyRect(key);
       renderer.drawRect(rect.x, rect.y, rect.width, rect.height, 1, true);
-      char label[2] = {};
+      const char label[2] = {static_cast<char>(key == KEY_ZERO ? '0' : '1' + key), '\0'};
       const char* text = label;
       if (key == KEY_DELETE) {
         text = tr(STR_DELETE);
       } else if (key == KEY_OK) {
         text = tr(STR_OK);
-      } else {
-        label[0] = static_cast<char>(key == KEY_ZERO ? '0' : '1' + key);
       }
       UITheme::drawCenteredText(renderer, rect, UI_10_FONT_ID,
                                 rect.y + (rect.height - renderer.getLineHeight(UI_10_FONT_ID)) / 2, text);

@@ -23,6 +23,7 @@
 #include "components/UITheme.h"
 #include "network/BookOrbitAutoDownload.h"
 #include "network/HomeWifi.h"
+#include "platform/LightSleep.h"
 #include "util/Dictionary.h"
 #include "util/DictionaryRegistry.h"
 #include "util/FontFamilyLabel.h"
@@ -597,7 +598,8 @@ inline SettingInfo buildSideButtonActionSetting(const StrId nameId, uint8_t Cros
 // can use it directly; mutable device UI lists use getSettingsList(), which
 // returns an owned copy and can add SD-card font and dictionary options.
 // The count is this fork's: upstream's entries plus the seven BookOrbit ones, the clock
-// latch toggle, the release-candidate update toggle and the recap toggle, plus Wi-Fi at Home on boards with PSRAM.
+// latch toggle, the release-candidate update toggle and the recap toggle, plus Wi-Fi at Home on boards with PSRAM
+// and Instant Wake on the X4 Classic.
 // Nine gesture entries (two-finger and edge) are compiled only
 // for touch devices, the five KOReader account entries only with its build switch, and two tilt entries are added at
 // run time on boards with the sensor.
@@ -606,9 +608,9 @@ inline constexpr size_t BASE_SETTINGS_KOREADER_ENTRIES = 5;
 #else
 inline constexpr size_t BASE_SETTINGS_KOREADER_ENTRIES = 0;
 #endif
-inline constexpr size_t BASE_SETTINGS_CAPACITY = 102 + 4 + (CROSSINK_APP_HOME_WIFI ? 1 : 0) +
-                                                 (CROSSINK_APP_SLEEP_AUTO_DOWNLOAD ? 1 : 0) +
-                                                 (CROSSINK_APP_CAP_TOUCH ? 9 : 0) + BASE_SETTINGS_KOREADER_ENTRIES;
+inline constexpr size_t BASE_SETTINGS_CAPACITY =
+    102 + 4 + (CROSSINK_APP_HOME_WIFI ? 1 : 0) + (CROSSINK_APP_INSTANT_WAKE ? 1 : 0) +
+    (CROSSINK_APP_SLEEP_AUTO_DOWNLOAD ? 1 : 0) + (CROSSINK_APP_CAP_TOUCH ? 9 : 0) + BASE_SETTINGS_KOREADER_ENTRIES;
 
 const std::vector<SettingInfo>& getBaseSettingsList();
 
@@ -1083,9 +1085,12 @@ inline std::vector<SettingInfo> buildSystemSettingsParentList(const std::vector<
 
 inline std::vector<SettingInfo> buildSystemDeviceSettingsList(const std::vector<SettingInfo>& allSettings) {
   std::vector<SettingInfo> settings;
-  settings.reserve(10);
+  settings.reserve(11);
   addSettingByName(settings, allSettings, StrId::STR_DEVICE_NAME);
   addSettingByName(settings, allSettings, StrId::STR_TIME_TO_SLEEP);
+#if CROSSINK_APP_INSTANT_WAKE
+  addSettingByName(settings, allSettings, StrId::STR_INSTANT_WAKE);
+#endif
   addSettingByName(settings, allSettings, StrId::STR_CUSTOM_BOOTSCREEN);
   settings.push_back(SettingInfo::Action(StrId::STR_LANGUAGE, SettingAction::Language));
   settings.push_back(SettingInfo::Action(StrId::STR_KEYBOARD_LAYOUTS, SettingAction::KeyboardLayouts));

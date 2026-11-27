@@ -12,6 +12,7 @@ bool HomeWifi::linkUp() { return WiFi.getMode() != WIFI_OFF && WiFi.status() == 
 #include <WallClock.h>
 
 #include <algorithm>
+#include <iterator>
 #include <string>
 #include <utility>
 #include <vector>
@@ -179,7 +180,8 @@ void collectScanResults(const int found) {
   }
   WiFi.scanDelete();
   const std::string lastNetwork = lastNetworkSeen ? candidates.front() : std::string();
-  for (auto& network : visible) candidates.push_back(std::move(network.second));
+  std::transform(visible.begin(), visible.end(), std::back_inserter(candidates),
+                 [](std::pair<int32_t, std::string>& network) { return std::move(network.second); });
   if (lastNetworkSeen) candidates.push_back(lastNetwork);
   LOG_INF("HWIFI", "Scan found %d networks; %u saved ones to try", found,
           static_cast<unsigned>(candidates.size() - nextCandidate));
@@ -350,6 +352,9 @@ void HomeWifi::onActivityEntering(const bool isHome, const bool isReader) {
 void HomeWifi::stop(const char* reason) {
   stopForBook = false;
   attemptScheduled = false;
+  // The next Home is an arrival, which schedules the join again: after Instant Wake's light
+  // sleep Home comes back without this program ever seeing it left.
+  wasOnHome = false;
   if (owningRadio()) {
     radioDown(reason);
   } else if (state == State::Released) {

@@ -127,6 +127,7 @@ inline esp_sleep_wakeup_cause_t esp_sleep_get_wakeup_cause() { return ESP_SLEEP_
 #include "network/HomeWebServer.h"
 #include "network/HomeWifi.h"
 #include "network/UsbSerialFileTransfer.h"
+#include "platform/LightSleep.h"
 #ifdef SIMULATOR
 #include <SimulatorLifecycle.h>
 
@@ -143,6 +144,7 @@ inline esp_sleep_wakeup_cause_t esp_sleep_get_wakeup_cause() { return ESP_SLEEP_
 #include "util/Dictionary.h"
 #include "util/DictionaryRegistry.h"
 #include "util/FrontlightSchedule.h"
+#include "util/InstantWakePolicy.h"
 #include "util/PowerButtonWakeWatcher.h"
 #include "util/ScreenshotUtil.h"
 #include "util/SleepWakePolicy.h"
@@ -399,8 +401,18 @@ using BootResume = SleepWakePolicy::Resume;
 // clear heap fragmentation on the way out, but deep sleep is a full chip reset
 // on wake and already clears the heap, so rebooting here would just power the
 // device back up against the user's sleep gesture. Never cleared:
-// startDeepSleep() does not return, so a set latch only ends at the wakeup reset.
+// startDeepSleep() does not return, so a set latch only ends at the wakeup reset, or at
+// an Instant Wake wake, the one sleep the program carries on from.
 static bool deepSleepInProgress = false;
+
+#if CROSSINK_APP_INSTANT_WAKE
+// Set by enterDeepSleep() when the sleep is to be Instant Wake's light sleep; loop() runs it.
+static bool instantWakeSleepRequested = false;
+static bool instantWakeSleepFromTimeout = false;
+#endif
+// Set when the device comes back from a light sleep: loop()'s inactivity timer starts again,
+// since millis() kept counting while the device slept.
+static bool resetInactivityTimer = false;
 
 // The boot that runs the BookOrbit sleep sync (NetworkBootTarget::BOOKORBIT_SLEEP_SYNC).
 // It must end in sleep, so it never starts another sleep sync.
@@ -1438,9 +1450,18 @@ void completeSleepAfterSleepSync() {
   powerDownForDeepSleep();
 }
 
-// Enter deep sleep mode
-void enterDeepSleep(bool fromTimeout) {
-  HalPowerManager::Lock powerLock;  // Ensure we are at normal CPU frequency for sleep preparation
+// What a sleep decided while it got ready, for the step that ends it.
+struct SleepPreparation {
+  bool syncBeforeSleep = false;
+  bool isQuickResumeSleep = false;
+  bool powerHeldAtSleep = false;
+};
+
+// Everything a sleep does before the device actually powers down: background work stops,
+// the outgoing activities save and exit, the sleep screen goes up and the files the wake
+// needs are written. Shared by a deep sleep and by Instant Wake's light sleep.
+static SleepPreparation prepareForSleep(const bool fromTimeout) {
+  SleepPreparation prep;
 #if CROSSINK_APP_BACKGROUND_DOWNLOADS
   // A shelf download still running stops cleanly before the radio goes; one that finished
   // gets its bookkeeping.
@@ -1456,9 +1477,9 @@ void enterDeepSleep(bool fromTimeout) {
   // place to wake into.
   if (!activityManager.isDeviceLocked()) APP_STATE.lastSleepFromReader = activityManager.isReaderActivity();
   // A long-press sleep fires while Power is still down (see BOOKORBIT_SLEEP_SYNC_PAYLOAD_POWER_HELD).
-  const bool powerHeldAtSleep = gpio.isPressed(HalGPIO::BTN_POWER);
+  prep.powerHeldAtSleep = gpio.isPressed(HalGPIO::BTN_POWER);
 
-  const bool isQuickResumeSleep =
+  prep.isQuickResumeSleep =
       SETTINGS.sleepScreen == CrossPointSettings::SLEEP_SCREEN_MODE::QUICK_RESUME ||
       (fromTimeout &&
        SETTINGS.quickResumeSleepScreen == CrossPointSettings::QUICK_RESUME_SLEEP_SCREEN::QUICK_RESUME_AFTER_TIMEOUT);
@@ -1468,12 +1489,12 @@ void enterDeepSleep(bool fromTimeout) {
 
   // Decided before the sleep screen is drawn: the sleep sync draws it again once over,
   // and this first pass records what that second one needs (see SleepScreenPass).
-  const bool syncBeforeSleep = shouldSyncBookOrbitBeforeSleep();
+  prep.syncBeforeSleep = shouldSyncBookOrbitBeforeSleep();
 
   // Commit to sleeping before goToSleep() runs the outgoing activity's onExit():
   // a WiFi activity would otherwise silentRestart() here and reboot instead.
   deepSleepInProgress = true;
-  activityManager.goToSleep(fromTimeout, syncBeforeSleep);
+  activityManager.goToSleep(fromTimeout, prep.syncBeforeSleep);
   // Reader exit may already have saved this state. Save after the sleep screen
   // appears, skipping an unchanged snapshot while still retrying failed saves.
   APP_STATE.saveToFile();
@@ -1485,7 +1506,7 @@ void enterDeepSleep(bool fromTimeout) {
 
   // Refreshes are synchronous; display.deepSleep() also finishes pending
   // display work and power-off, so an extra settle delay serves no purpose.
-  if (isQuickResumeSleep) {
+  if (prep.isQuickResumeSleep) {
     saveSleepFrameBuffer();
   } else {
     if (Storage.exists(SLEEP_FRAME_FILE)) {
@@ -1500,15 +1521,45 @@ void enterDeepSleep(bool fromTimeout) {
       LOG_ERR("MAIN", "Automatic reading-stats backup failed before deep sleep");
     }
   }
+  return prep;
+}
 
-  // With Sync on Sleep on, the sleep screen is up and the frame and files the wake needs
-  // are written: the device now syncs behind that screen, then comes back to sleep
-  // through completeSleepAfterSleepSync().
-  if (syncBeforeSleep) {
-    restartIntoSleepSync(powerHeldAtSleep, isQuickResumeSleep);
+// The end of every sleep that is not a light one: with Sync on Sleep on, the sleep screen
+// is up and the frame and files the wake needs are written, so the device now syncs behind
+// that screen, then comes back to sleep through completeSleepAfterSleepSync(). Otherwise
+// it powers down at once. Neither returns on hardware.
+static void finishSleep(const SleepPreparation& prep) {
+  if (prep.syncBeforeSleep) {
+    restartIntoSleepSync(prep.powerHeldAtSleep, prep.isQuickResumeSleep);
   }
 
   powerDownForDeepSleep();
+}
+
+#if CROSSINK_APP_INSTANT_WAKE
+static bool shouldLightSleep();
+#endif
+
+// Enter deep sleep mode (or, with Instant Wake on, ask loop() for its light sleep)
+void enterDeepSleep(bool fromTimeout) {
+#if CROSSINK_APP_INSTANT_WAKE
+  // Instant Wake: the light sleep and the wake that follows it run from the top of loop(),
+  // because the wake carries on in this same program. The caller (often an activity, which
+  // goToSleep() destroys) must first get back to the main loop, so this only asks for the
+  // sleep. Every caller returns right after the call, and its activity stays alive until
+  // loop() runs the sleep, so nothing touches a destroyed activity.
+  if (shouldLightSleep()) {
+    if (!instantWakeSleepRequested) {
+      LOG_INF("SLP", "Instant Wake: sleep requested (%s)", fromTimeout ? "timeout" : "asked");
+      instantWakeSleepRequested = true;
+      instantWakeSleepFromTimeout = fromTimeout;
+    }
+    return;
+  }
+#endif
+  HalPowerManager::Lock powerLock;  // Ensure we are at normal CPU frequency for sleep preparation
+  const SleepPreparation prep = prepareForSleep(fromTimeout);
+  finishSleep(prep);
 }
 
 // Where an ordinary boot lands once it is past the PIN lock (or straight away without
@@ -1531,6 +1582,195 @@ static void finishBootRoute(const BootRoute& route) {
   APP_STATE.saveToFile();
   activityManager.goToReader(path, false, route.allowFastInitialReaderRefresh);
 }
+
+// Lands where finishBootRoute() says, behind the PIN lock when one is set.
+static void startBootRoute(BootRoute route) {
+  if (!DevicePinStore::isSet()) {
+    finishBootRoute(route);
+    return;
+  }
+  // The PIN lock paints first (cleaning the sleep image itself), so the screen it
+  // hands over to starts from the lock's frame, not from a restored sleep frame.
+  route.homeRefreshMode = HalDisplay::FAST_REFRESH;
+  route.allowFastInitialReaderRefresh = false;
+  auto lock = makeUniqueNoThrow<DevicePinActivity>(renderer, mappedInputManager, DevicePinActivity::Mode::Unlock,
+                                                   [route] { finishBootRoute(route); });
+  if (lock) {
+    activityManager.replaceActivity(std::move(lock));
+  } else {
+    // Without the memory for the lock screen nothing behind it can run either;
+    // sleeping keeps the device locked rather than opening it.
+    LOG_ERR("MAIN", "OOM: PIN lock (free=%u maxAlloc=%u); sleeping", ESP.getFreeHeap(), ESP.getMaxAllocHeap());
+    enterDeepSleep();
+  }
+}
+
+#if CROSSINK_APP_INSTANT_WAKE
+// Instant Wake --------------------------------------------------------------------------
+//
+// With Settings > System > Device > Instant Wake on, a sleep first only light-sleeps for the
+// chosen minutes: the chip keeps its memory, so a Power press brings the device back
+// without restarting. The sleep itself is the usual one (the activities save and exit, the
+// sleep screen goes up), only the power-down at its end waits. When the time is up the
+// device finishes that sleep the usual way, BookOrbit sleep sync and deep sleep included.
+
+static bool shouldLightSleep() {
+  // The sleep sync's boot must end in deep sleep, and a sleep already under way (a Wi-Fi
+  // activity's onExit() during one) is never turned into another.
+  return !sleepSyncBoot && !deepSleepInProgress && SETTINGS.getInstantWakeMinutes() > 0;
+}
+
+static uint32_t instantWakeDurationMs() {
+  uint32_t durationMs = InstantWakePolicy::durationMs(SETTINGS.getInstantWakeMinutes());
+#ifdef SIMULATOR
+  // Scenario hook: the integration tests cannot wait out whole minutes.
+  if (const char* overrideMs = std::getenv("CROSSINK_SIM_INSTANT_WAKE_MS")) {
+    const long value = std::strtol(overrideMs, nullptr, 10);
+    if (value > 0) durationMs = static_cast<uint32_t>(value);
+  }
+#endif
+  return durationMs;
+}
+
+// Back from the light sleep: the device lands where a power-button wake from deep sleep
+// would put it (the book, Home, the PIN lock), minus the restart in between.
+static void wakeFromLightSleep(const SleepPreparation& prep, const uint32_t sleptMs) {
+  LOG_INF("SLP", "Instant Wake: woken by Power after %lu s", static_cast<unsigned long>(sleptMs / 1000));
+  deepSleepInProgress = false;
+  powerManager.setPowerSaving(false);
+  BatteryDiagnosticLog::record(BatteryDiagnosticLog::Event::Wake, BoardConfig::ACTIVE.name, "InstantWake");
+  BatteryUsage::record(BatteryUsage::Event::Wake, static_cast<uint8_t>(powerManager.getBatteryPercentage()),
+                       gpio.isUsbConnected());
+
+  // The wake press is not an action, as after a deep-sleep wake (see setup()).
+  gpio.update();
+  wakePowerReleasePending = true;
+  powerButtonReleasedSinceWake = false;
+  mappedInputManager.suppressNextPowerRelease();
+  mappedInputManager.suppressNextPowerConfirmRelease();
+  // A restart would have woken the device unlocked; so does this wake.
+  if (buttonShortcutController.isQuickLocked()) {
+    buttonShortcutController.resetQuickLock();
+    activityManager.notifyInputLockChanged(false);
+  }
+  APP_STATE.quickLockResumePending = false;
+  APP_STATE.quickLockRestoreFrontlight = false;
+
+  // The card stayed mounted through the sleep. Should it have stopped answering, a normal
+  // restart (which mounts it again) is the safe way back.
+  if (!Storage.exists("/.crosspoint")) {
+    LOG_ERR("SLP", "Instant Wake: the SD card does not answer after the light sleep; restarting");
+    APP_STATE.saveToFile();
+    ESP.restart();
+    return;
+  }
+
+  // The boot screen shows on a wake only when the reader asked for one (see setup()).
+  bool hasBootScreenDirectory = false;
+  bool hasPinnedBootScreen = false;
+  if (SETTINGS.customBootscreenEnabled && !APP_STATE.showBootScreen) {
+    std::string bootScreenDirectory;
+    hasBootScreenDirectory = ImageFolderIndex::resolveBootScreenDirectory(bootScreenDirectory);
+    hasPinnedBootScreen = !APP_STATE.favoriteBootImagePath.empty() &&
+                          FsHelpers::hasBmpExtension(APP_STATE.favoriteBootImagePath) &&
+                          Storage.exists(APP_STATE.favoriteBootImagePath.c_str());
+  }
+  const bool skipSplash = !APP_STATE.showBootScreen && !hasBootScreenDirectory && !hasPinnedBootScreen;
+  bool allowFastInitialReaderRefresh = false;
+  bool fastPaint = false;
+  if (skipSplash) {
+    // Re-arm the splash for the next ordinary boot, as a splashless deep-sleep wake does.
+    APP_STATE.showBootScreen = true;
+    if (prep.isQuickResumeSleep) {
+      // The panel and the frame buffer still hold the Quick Resume page, so the first
+      // paint only drives the pixels that change.
+      allowFastInitialReaderRefresh = true;
+      fastPaint = true;
+    } else if (shouldClearX4WakeGhosting() && SETTINGS.fadingFix != 0) {
+      renderer.clearScreen();
+      renderer.displayBuffer(HalDisplay::HALF_REFRESH);
+      allowFastInitialReaderRefresh = true;
+      fastPaint = true;
+    }
+  } else {
+    activityManager.goToBoot();
+  }
+  APP_STATE.saveToFile();
+
+  BootRoute route;
+  route.toReader = !APP_STATE.openEpubPath.empty() && APP_STATE.lastSleepFromReader &&
+                   !mappedInputManager.isPressed(MappedInputManager::Button::Back) &&
+                   APP_STATE.readerActivityLoadCount == 0;
+  route.homeRefreshMode =
+      skipSplash && shouldClearX4WakeGhosting() && !fastPaint ? HalDisplay::HALF_REFRESH : HalDisplay::FAST_REFRESH;
+  route.allowFastInitialReaderRefresh = allowFastInitialReaderRefresh;
+  startBootRoute(route);
+
+  allowSleepAt = millis() + 2000;
+  resetInactivityTimer = true;
+}
+
+static void runInstantWakeSleep(const bool fromTimeout) {
+  SleepPreparation prep;
+  {
+    HalPowerManager::Lock powerLock;  // Normal CPU frequency for sleep preparation
+    prep = prepareForSleep(fromTimeout);
+  }
+  const uint32_t durationMs = instantWakeDurationMs();
+  LOG_INF("SLP", "Instant Wake: light sleep for up to %lu s%s", static_cast<unsigned long>(durationMs / 1000),
+          prep.syncBeforeSleep ? ", then the BookOrbit sleep sync" : "");
+  // Battery Use counts a light sleep as sleep: a wake from it closes an asleep stretch.
+  BatteryDiagnosticLog::record(BatteryDiagnosticLog::Event::Sleep, BoardConfig::ACTIVE.name);
+  BatteryUsage::record(BatteryUsage::Event::Sleep, static_cast<uint8_t>(powerManager.getBatteryPercentage()),
+                       gpio.isUsbConnected());
+  putTiltSensorToSleepForDeepSleep();
+  // The press that asked for this sleep must end first, or its level would wake the chip.
+  LightSleep::waitForPowerButtonRelease();
+
+  const unsigned long start = millis();
+  uint8_t falseWakes = 0;
+  bool failed = false;
+  while (true) {
+    const uint32_t remaining = InstantWakePolicy::remainingMs(millis() - start, durationMs);
+    if (remaining == 0) break;
+    const LightSleep::Wake wake = LightSleep::sleepFor(remaining);
+    const bool pressAccepted =
+        wake != LightSleep::Wake::Timer && wake != LightSleep::Wake::Failed && LightSleep::isPowerButtonDown() &&
+        LightSleep::verifyWakePress(SETTINGS.shortPowerPressWakes(), CrossPointSettings::POWER_BUTTON_LONG_PRESS_MS);
+    const InstantWakePolicy::Outcome outcome = InstantWakePolicy::afterWake(
+        wake, pressAccepted, InstantWakePolicy::remainingMs(millis() - start, durationMs), falseWakes);
+    if (outcome == InstantWakePolicy::Outcome::WakeUp) {
+      wakeFromLightSleep(prep, millis() - start);
+      return;
+    }
+    if (outcome == InstantWakePolicy::Outcome::HandOff) {
+      failed = wake == LightSleep::Wake::Failed || falseWakes > InstantWakePolicy::MAX_FALSE_WAKES;
+      break;
+    }
+    // A press too short to wake the device must end before the chip sleeps on its level.
+    LightSleep::waitForPowerButtonRelease();
+  }
+
+  if (failed) {
+    LOG_ERR("SLP", "Instant Wake: light sleep unavailable (%u wakes without a press); deep-sleeping now",
+            static_cast<unsigned>(falseWakes));
+  } else {
+    LOG_INF("SLP", "Instant Wake: time up after %lu s; finishing the sleep",
+            static_cast<unsigned long>((millis() - start) / 1000));
+  }
+  HalPowerManager::Lock powerLock;
+  // The checkpoint taken as the sleep began is as old as the light sleep (see WallClock).
+  WallClock::checkpoint();
+  // The sync decided as the sleep began still needs the battery it needed then.
+  if (prep.syncBeforeSleep && !shouldSyncBookOrbitBeforeSleep()) {
+    LOG_INF("SLP", "Instant Wake: the BookOrbit sleep sync is no longer possible; deep-sleeping without it");
+    prep.syncBeforeSleep = false;
+  }
+  // Nothing is held from the sleep press now: a press during the sync is a wake.
+  prep.powerHeldAtSleep = false;
+  finishSleep(prep);
+}
+#endif
 
 // On the PIN lock the Power button may sleep the device, refresh the panel or switch
 // the light, and nothing else: every other action would open a screen behind the lock.
@@ -2086,24 +2326,7 @@ void setup() {
                                 ? HalDisplay::HALF_REFRESH
                                 : HalDisplay::FAST_REFRESH;
     route.allowFastInitialReaderRefresh = allowFastInitialReaderRefresh;
-    if (!DevicePinStore::isSet()) {
-      finishBootRoute(route);
-    } else {
-      // The PIN lock paints first (cleaning the sleep image itself), so the screen it
-      // hands over to starts from the lock's frame, not from a restored sleep frame.
-      route.homeRefreshMode = HalDisplay::FAST_REFRESH;
-      route.allowFastInitialReaderRefresh = false;
-      auto lock = makeUniqueNoThrow<DevicePinActivity>(renderer, mappedInputManager, DevicePinActivity::Mode::Unlock,
-                                                       [route] { finishBootRoute(route); });
-      if (lock) {
-        activityManager.replaceActivity(std::move(lock));
-      } else {
-        // Without the memory for the lock screen nothing behind it can run either;
-        // sleeping keeps the device locked rather than opening it.
-        LOG_ERR("MAIN", "OOM: PIN lock (free=%u maxAlloc=%u); sleeping", ESP.getFreeHeap(), ESP.getMaxAllocHeap());
-        enterDeepSleep();
-      }
-    }
+    startBootRoute(route);
   }
 
   // The sleep sync paints nothing: the sleep screen stays on the panel.
@@ -2139,6 +2362,15 @@ void loop() {
     activityManager.loop();
     return;
   }
+#if CROSSINK_APP_INSTANT_WAKE
+  // Asked for by enterDeepSleep() since the last frame: nothing of the activity that asked
+  // is on the stack here, so the sleep may tear it down and the wake may carry on.
+  if (instantWakeSleepRequested) {
+    instantWakeSleepRequested = false;
+    runInstantWakeSleep(instantWakeSleepFromTimeout);
+    return;
+  }
+#endif
 #ifndef SIMULATOR
   // The main task owns calibration. Exclude render-task battery/clock reads
   // during each short SDK step without blocking input behind a busy renderer.
@@ -2210,6 +2442,10 @@ void loop() {
 
   // Check for any user activity (button press or release) or active background work
   static unsigned long lastActivityTime = millis();
+  if (resetInactivityTimer) {
+    resetInactivityTimer = false;
+    lastActivityTime = millis();
+  }
   // A book downloading in the background (from a Home shelf), or a file arriving through
   // Home's web page, keeps the device awake too.
   if (userInputReceived || activityManager.preventAutoSleep() || BookOrbitBackgroundDownloads::busy() ||

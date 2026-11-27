@@ -9,6 +9,8 @@ on; for everything inherited from upstream, see the
 
 ### Added
 
+- **Instant Wake** (X4 Classic), in Settings > System > Device (60 minutes by default): for the time you choose after the reader goes to sleep, it only light-sleeps and keeps everything in memory, so Power brings it back without a restart. The sleep screen, your saved place and the PIN lock work as before. Nothing syncs during that time. When it is up, the reader finishes going to sleep the usual way: with Sync on Sleep on it syncs your books, the BookOrbit Home and the missing-book downloads behind the sleep screen, then deep-sleeps, so BookOrbit hears about your reading up to that long after you put the reader down. Light sleep uses more battery than deep sleep, which is why it ends after the chosen time. Choose 15 to 180 minutes in steps of 15, or Off to have every sleep be a deep sleep, as before.
+
 - Ashad's Books branding: the boot screen and the plain built-in sleep screen show "Ashad's Books" with an open book logo instead of "CrossInk" and the drop. Your own boot and sleep pictures are unchanged.
 
 - Next in series at the end of a book: when the book you finished is numbered in a series (as the Library's Series order shows it), the End-of-Book screen first offers the next book of the series. When it is on the card, wherever it is filed, "Next in series: <title>" opens it. When it is not, or the card skips a number, "Get the next in series from BookOrbit" connects, finds the book numbered next in that series on your BookOrbit server, downloads it and opens it (if it is already on the card it just opens). The books after this one in its folder still follow below.

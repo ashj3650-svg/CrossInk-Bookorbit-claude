@@ -48,6 +48,13 @@ from kosync import BASE_URL, AdminClient, KosyncDevice, kodatetime, partial_md5,
 # CROSSINK_SIM_PROGRAM picks another simulator build, such as x4-classic-simulator's: the
 # PSRAM-board features (recent-book sync, new-book downloads) only exist there.
 PROGRAM = Path(os.environ.get("CROSSINK_SIM_PROGRAM", str(ROOT / ".pio" / "build" / "simulator" / "program")))
+# The simulator env the build came from, read from its .../<env>/program path. CROSSINK_SIM_ENV
+# names it when the binary lives somewhere else.
+SIM_ENV = os.environ.get("CROSSINK_SIM_ENV", PROGRAM.parent.name)
+# The PSRAM boards download books in the background and sync recent books at sleep; the
+# C3 simulator restarts into a download boot and has neither.
+PSRAM_SIM_ENVS = frozenset({"x4-classic-simulator", "x4-pro-simulator", "sticky-simulator"})
+INSTANT_WAKE_SIM_ENVS = frozenset({"x4-classic-simulator"})
 
 # The simulator's fixed fake MAC (simulator package esp_mac.h) drives both the
 # credential obfuscation and the device id the firmware reports to the server.
@@ -394,6 +401,9 @@ class SimFs:
         }))
         (self.crosspoint / "crossink-settings.json").write_text(json.dumps({
             "shortPwrBtn": SHORT_PWRBTN_BOOKORBIT_SYNC,
+            # Instant Wake (x4-classic-simulator) is on by default; the scenarios that
+            # do not test it keep the deep sleep they were written for.
+            "instantWakeMinutes": 0,
         }))
         # A saved network lets the minimal network boot connect on its own (the
         # sim WiFi stub accepts anything); without one the sync parks on the
@@ -409,9 +419,16 @@ class SimFs:
         bookorbit = json.loads((self.crosspoint / "bookorbit.json").read_text())
         bookorbit["syncOnSleep"] = True
         (self.crosspoint / "bookorbit.json").write_text(json.dumps(bookorbit))
-        (self.crosspoint / "crossink-settings.json").write_text(json.dumps({
-            "shortPwrBtn": SHORT_PWRBTN_SLEEP,
-        }))
+        settings = json.loads((self.crosspoint / "crossink-settings.json").read_text())
+        settings["shortPwrBtn"] = SHORT_PWRBTN_SLEEP
+        (self.crosspoint / "crossink-settings.json").write_text(json.dumps(settings))
+
+    def enable_instant_wake(self, minutes: int = 60) -> None:
+        """Instant Wake on: sleeps light-sleep first and only finish (sync, deep sleep) once
+        the time is up. Runs pass CROSSINK_SIM_INSTANT_WAKE_MS to shorten the wait."""
+        settings = json.loads((self.crosspoint / "crossink-settings.json").read_text())
+        settings["instantWakeMinutes"] = minutes
+        (self.crosspoint / "crossink-settings.json").write_text(json.dumps(settings))
 
     def write_sync_marker(self, book_hash: str, timestamp: int,
                           position: tuple[int, int, int] | None = None) -> None:
@@ -774,6 +791,7 @@ def scenario_sleep_sync_push(verbose: bool) -> None:
         output = run_simulator(fs, input_script="6000:POWER:120", choice="none",
                                timeout_s=90, verbose=verbose)
         assert "Restarting into the BookOrbit sleep sync" in output, "sleep did not hand over to the sleep sync"
+        assert "Instant Wake" not in output, "Instant Wake off, yet the sleep went through it"
         assert "Sleep sync over" in output, "sleep sync never ran to its end"
         assert "sync scenario finished" in output, "sleep sync never reached its end marker"
 
@@ -797,7 +815,8 @@ def scenario_home_theme_refresh(verbose: bool) -> None:
     manifest, _ = load_seed()
     with tempfile.TemporaryDirectory(prefix="crossink-integ-") as tmp:
         fs = SimFs(Path(tmp), manifest["kosync"])
-        (fs.crosspoint / "crossink-settings.json").write_text(json.dumps({"uiTheme": UI_THEME_BOOKORBIT}))
+        (fs.crosspoint / "crossink-settings.json").write_text(
+            json.dumps({"uiTheme": UI_THEME_BOOKORBIT, "instantWakeMinutes": 0}))
         assert home_snapshot_header(fs) is None
         # Without books the tile is the page's second stop. The run ends on the timeout:
         # nothing can be scheduled across the two restarts.
@@ -814,7 +833,8 @@ def scenario_home_download_returns_home(verbose: bool) -> None:
     manifest, _ = load_seed()
     with tempfile.TemporaryDirectory(prefix="crossink-integ-") as tmp:
         fs = SimFs(Path(tmp), manifest["kosync"])
-        (fs.crosspoint / "crossink-settings.json").write_text(json.dumps({"uiTheme": UI_THEME_BOOKORBIT}))
+        (fs.crosspoint / "crossink-settings.json").write_text(
+            json.dumps({"uiTheme": UI_THEME_BOOKORBIT, "instantWakeMinutes": 0}))
         run_simulator(fs, input_script="3000:DOWN:120;4500:CONFIRM:120", choice="none", timeout_s=14,
                       verbose=verbose)
         assert home_snapshot_header(fs) is not None, "the tile wrote no Home snapshot"
@@ -851,7 +871,8 @@ def scenario_home_also_reading_link(verbose: bool) -> None:
     reading_total = server.catalog_page(size=1, format="epub", readStatus="reading")["total"]
     with tempfile.TemporaryDirectory(prefix="crossink-integ-") as tmp:
         fs = SimFs(Path(tmp), manifest["kosync"])
-        (fs.crosspoint / "crossink-settings.json").write_text(json.dumps({"uiTheme": UI_THEME_BOOKORBIT}))
+        (fs.crosspoint / "crossink-settings.json").write_text(
+            json.dumps({"uiTheme": UI_THEME_BOOKORBIT, "instantWakeMinutes": 0}))
         run_simulator(fs, input_script="3000:DOWN:120;4500:CONFIRM:120", choice="none", timeout_s=14,
                       verbose=verbose)
         assert home_snapshot_header(fs) is not None, "the tile wrote no Home snapshot"
@@ -1331,6 +1352,181 @@ def scenario_sleep_sync_cancel(verbose: bool) -> None:
         cancelled_at = output.index("Sleep sync cancelled")
         assert "Wake route: PowerButton" in output[cancelled_at:], "the cancel did not boot as a power-button wake"
         assert "Sleep sync over" not in output, "a sleep sync ran to its end despite the press"
+
+
+def scenario_instant_wake_hands_off_to_sleep_sync(verbose: bool) -> None:
+    """Instant Wake: a sleep first only light-sleeps, with no sync, and when its time is up
+    the device finishes the sleep the usual way, here the BookOrbit sleep sync, which
+    uploads the further local position. x4-classic-simulator only."""
+    manifest, _ = load_seed()
+    seeded = manifest["progress"][2]
+    source = INTEGRATION / "library" / seeded["file"]
+    book_hash = seeded["hash"]
+    peer = peer_device(manifest)
+    peer.put_progress(book_hash, seeded["progress"], seeded["percentage"])
+
+    with tempfile.TemporaryDirectory(prefix="crossink-integ-") as tmp:
+        fs = SimFs(Path(tmp), manifest["kosync"])
+        fs.enable_sync_on_sleep()
+        fs.enable_instant_wake(60)
+        sim_path = fs.add_book(source)
+        fs.set_open_book(sim_path)
+        write_progress_bin(fs.epub_cache_dir(sim_path) / "progress.bin", 4, 0, 1)
+        fs.write_sync_marker(book_hash, int(time.time()) + 3600)
+
+        output = run_simulator(fs, input_script="6000:POWER:120", choice="none", timeout_s=90,
+                               verbose=verbose, extra_env={"CROSSINK_SIM_INSTANT_WAKE_MS": "5000"})
+        if "Instant Wake" not in output:
+            raise AssertionError("no Instant Wake: run this one against x4-classic-simulator")
+        light = output.find("Instant Wake: light sleep for up to 5 s, then the BookOrbit sleep sync")
+        assert light >= 0, "the sleep did not start as a light sleep with the sync to follow"
+        time_up = output.find("Instant Wake: time up after", light)
+        assert time_up > light, "the light sleep never handed off"
+        restart = output.find("Restarting into the BookOrbit sleep sync")
+        assert restart > time_up, "the sleep sync started before the light sleep was over"
+        assert "Sleep sync over" in output[restart:], "sleep sync never ran to its end"
+        assert "sync scenario finished" in output, "sleep sync never reached its end marker"
+        assert "woken by Power" not in output, "nothing pressed Power, yet the device woke"
+
+    remote = peer.get_progress(book_hash)
+    assert float(remote.get("percentage", 0)) > 0.5, f"server progress not advanced: {remote}"
+    assert remote.get("device_id") == SIM_DEVICE_ID, f"unexpected device id: {remote}"
+
+
+def scenario_instant_wake_round_trip(verbose: bool) -> None:
+    """The whole Instant Wake cycle in one process: asleep in the book, Power wakes it back
+    into the reader without a restart and without syncing; asleep again, the time runs out
+    and the BookOrbit sleep sync runs, uploading the position. x4-classic-simulator only."""
+    manifest, _ = load_seed()
+    seeded = manifest["progress"][2]
+    source = INTEGRATION / "library" / seeded["file"]
+    book_hash = seeded["hash"]
+    peer = peer_device(manifest)
+    peer.put_progress(book_hash, seeded["progress"], seeded["percentage"])
+
+    with tempfile.TemporaryDirectory(prefix="crossink-integ-") as tmp:
+        fs = SimFs(Path(tmp), manifest["kosync"])
+        fs.enable_sync_on_sleep()
+        fs.enable_instant_wake(60)
+        sim_path = fs.add_book(source)
+        fs.set_asleep_in_book(sim_path)
+        write_progress_bin(fs.epub_cache_dir(sim_path) / "progress.bin", 4, 0, 1)
+        fs.write_sync_marker(book_hash, int(time.time()) + 3600)
+
+        # 8 s: sleep from the reader. 11 s: Power, 3 s into a 6 s light sleep, wakes it.
+        # 17 s: sleep again; this time the 6 s run out and the sleep sync follows.
+        output = run_simulator(fs, input_script="8000:POWER:120;11000:POWER:120;17000:POWER:120",
+                               choice="none", timeout_s=120, verbose=verbose, wake_into_reader=True,
+                               extra_env={"CROSSINK_SIM_INSTANT_WAKE_MS": "6000"})
+        if "Instant Wake" not in output:
+            raise AssertionError("no Instant Wake: run this one against x4-classic-simulator")
+        first_reader = output.find("Entering activity: EpubReader")
+        assert first_reader >= 0, "the run never opened the reader"
+        first_sleep = output.find("Instant Wake: light sleep for up to 6 s", first_reader)
+        assert first_sleep > first_reader, "the first sleep was not a light sleep"
+        woken = output.find("Instant Wake: woken by Power", first_sleep)
+        assert woken > first_sleep, "Power did not wake the device from the light sleep"
+        assert "Restarting into the BookOrbit sleep sync" not in output[:woken], \
+            "the device synced before it was woken: the light sleep must not sync"
+        sync_restart = output.find("Restarting into the BookOrbit sleep sync")
+        restarts_before_sync = output[:sync_restart].count("Reset diagnostic")
+        assert restarts_before_sync == 1, "the device restarted between the light sleep and the sync"
+        back_in_book = output.find("Entering activity: EpubReader", woken)
+        assert back_in_book > woken, "the wake did not land back in the book"
+        second_sleep = output.find("Instant Wake: light sleep for up to 6 s", back_in_book)
+        assert second_sleep > back_in_book, "the second sleep was not a light sleep"
+        time_up = output.find("Instant Wake: time up after", second_sleep)
+        assert time_up > second_sleep, "the second light sleep never handed off"
+        restart = output.find("Restarting into the BookOrbit sleep sync", time_up)
+        assert restart > time_up, "the hand-off did not start the sleep sync"
+        assert "Sleep sync over" in output[restart:], "sleep sync never ran to its end"
+        assert "sync scenario finished" in output, "sleep sync never reached its end marker"
+
+    remote = peer.get_progress(book_hash)
+    assert float(remote.get("percentage", 0)) > 0.5, f"server progress not advanced: {remote}"
+    assert remote.get("device_id") == SIM_DEVICE_ID, f"unexpected device id: {remote}"
+
+
+def scenario_instant_wake_without_sync_deep_sleeps(verbose: bool) -> None:
+    """Instant Wake with Sync on Sleep off: the hand-off goes straight to deep sleep, which
+    in the simulator only ends with a press that relaunches the process as a power-button
+    wake, the proof that the device really reached deep sleep. x4-classic-simulator only."""
+    manifest, _ = load_seed()
+    with tempfile.TemporaryDirectory(prefix="crossink-integ-") as tmp:
+        fs = SimFs(Path(tmp), manifest["kosync"])
+        fs.enable_sync_on_sleep()
+        bookorbit = json.loads((fs.crosspoint / "bookorbit.json").read_text())
+        bookorbit["syncOnSleep"] = False
+        (fs.crosspoint / "bookorbit.json").write_text(json.dumps(bookorbit))
+        fs.enable_instant_wake(15)
+
+        # 6 s: sleep from Home. The 3 s light sleep ends; 14 s: Power wakes the deep sleep.
+        output = run_simulator(fs, input_script="6000:POWER:120;14000:POWER:120", choice="none",
+                               timeout_s=24, verbose=verbose, extra_env={"CROSSINK_SIM_INSTANT_WAKE_MS": "3000"})
+        if "Instant Wake" not in output:
+            raise AssertionError("no Instant Wake: run this one against x4-classic-simulator")
+        light = output.find("Instant Wake: light sleep for up to 3 s")
+        assert light >= 0, "the sleep did not start as a light sleep"
+        assert "then the BookOrbit sleep sync" not in output, "a sync was planned with Sync on Sleep off"
+        time_up = output.find("Instant Wake: time up after", light)
+        assert time_up > light, "the light sleep never handed off"
+        assert "Restarting into the BookOrbit sleep sync" not in output, "a sleep sync ran with Sync on Sleep off"
+        assert "woken by Power" not in output, "the press woke the light sleep instead of the deep sleep"
+        assert "Wake route: PowerButton" in output[time_up:], "the device never deep-slept and woke from it"
+
+
+def scenario_instant_wake_keeps_pin_lock(verbose: bool) -> None:
+    """A wake from Instant Wake's light sleep lands on the Device PIN lock when a PIN is set,
+    as a deep-sleep wake does: carrying on without a restart must not skip it."""
+    manifest, _ = load_seed()
+    with tempfile.TemporaryDirectory(prefix="crossink-integ-") as tmp:
+        fs = SimFs(Path(tmp), manifest["kosync"])
+        fs.enable_sync_on_sleep()
+        fs.enable_instant_wake(60)
+        # DevicePinStore's record: "CPIN", version 1, salt, hash (no PIN is ever entered).
+        (fs.crosspoint / "device_pin.bin").write_bytes(struct.pack("<IHHII", 0x4E495043, 1, 0, 1, 2))
+
+        output = run_simulator(fs, input_script="3000:POWER:120;6000:POWER:120;10000:QUIT", choice="none",
+                               timeout_s=20, verbose=verbose, extra_env={"CROSSINK_SIM_INSTANT_WAKE_MS": "60000"})
+        if "Instant Wake" not in output:
+            raise AssertionError("no Instant Wake: run this one against x4-classic-simulator")
+        woken = output.find("Instant Wake: woken by Power")
+        assert woken >= 0, "Power did not wake the device from the light sleep"
+        after = output[woken:]
+        assert "Entering activity: DevicePin" in after, "the wake skipped the PIN lock"
+        assert "Entering activity: Home" not in after, "Home opened behind the PIN lock's back"
+
+
+def scenario_instant_wake_after_auto_sleep(verbose: bool) -> None:
+    """The inactivity timer's sleep goes through Instant Wake too, with Quick Resume after a
+    timeout keeping the page: Power brings the reader back, and the wake restarts the
+    inactivity timer rather than sleeping again at once."""
+    manifest, _ = load_seed()
+    source = INTEGRATION / "library" / manifest["progress"][3]["file"]
+    with tempfile.TemporaryDirectory(prefix="crossink-integ-") as tmp:
+        fs = SimFs(Path(tmp), manifest["kosync"])
+        fs.enable_sync_on_sleep()
+        fs.enable_instant_wake(60)
+        settings = json.loads((fs.crosspoint / "crossink-settings.json").read_text())
+        settings["sleepTimeoutMinutes"] = 1
+        settings["quickResumeSleepScreen"] = 1  # QUICK_RESUME_AFTER_TIMEOUT
+        (fs.crosspoint / "crossink-settings.json").write_text(json.dumps(settings))
+        sim_path = fs.add_book(source)
+        fs.set_asleep_in_book(sim_path)
+
+        # The timer sleeps the reader at about 60 s; Power at 66 s wakes it; the run ends at
+        # 90 s, well inside the next minute of the restarted timer.
+        output = run_simulator(fs, input_script="66000:POWER:120;90000:QUIT", choice="none", timeout_s=110,
+                               verbose=verbose, wake_into_reader=True,
+                               extra_env={"CROSSINK_SIM_INSTANT_WAKE_MS": "600000"})
+        if "Instant Wake" not in output:
+            raise AssertionError("no Instant Wake: run this one against x4-classic-simulator")
+        requested = output.find("Instant Wake: sleep requested (timeout)")
+        assert requested >= 0, "the inactivity timer did not ask for an Instant Wake sleep"
+        woken = output.find("Instant Wake: woken by Power", requested)
+        assert woken > requested, "Power did not wake the device from the light sleep"
+        assert "Entering activity: EpubReader" in output[woken:], "the wake did not reopen the book"
+        assert output.count("Instant Wake: sleep requested") == 1, "the device fell asleep again right after the wake"
 
 
 def scenario_highlight_pull(verbose: bool) -> None:
@@ -2662,7 +2858,8 @@ def scenario_home_refresh_device_scan(verbose: bool) -> None:
 
     with tempfile.TemporaryDirectory(prefix="crossink-integ-") as tmp:
         fs = SimFs(Path(tmp), manifest["kosync"])
-        (fs.crosspoint / "crossink-settings.json").write_text(json.dumps({"uiTheme": UI_THEME_BOOKORBIT}))
+        (fs.crosspoint / "crossink-settings.json").write_text(
+            json.dumps({"uiTheme": UI_THEME_BOOKORBIT, "instantWakeMinutes": 0}))
         copies = [fs.fs / "Inbox" / "copied.epub", fs.fs / "Inbox" / "copied (1).epub"]
         for copy in copies:
             copy.parent.mkdir(parents=True, exist_ok=True)
@@ -3061,7 +3258,8 @@ def scenario_series_next_on_card(verbose: bool) -> None:
 
         # Home menu -> Library, whose first open builds the index the lookup reads (in any
         # order but Recently Read, which needs no index).
-        (fs.crosspoint / "crossink-settings.json").write_text(json.dumps({"librarySortMethod": 1}))
+        (fs.crosspoint / "crossink-settings.json").write_text(
+            json.dumps({"librarySortMethod": 1, "instantWakeMinutes": 0}))
         run_simulator(fs, input_script="3000:DOWN:120;3600:CONFIRM:120;12000:QUIT", choice="none",
                       timeout_s=30, verbose=verbose)
         assert (fs.crosspoint / "library.idx").exists(), "the Library built no index"
@@ -3135,6 +3333,11 @@ SCENARIOS = {
     "sleep_sync_conflict": scenario_sleep_sync_conflict,
     "sleep_sync_keeps_progress_reset": scenario_sleep_sync_keeps_progress_reset,
     "sleep_sync_cancel": scenario_sleep_sync_cancel,
+    "instant_wake_hands_off_to_sleep_sync": scenario_instant_wake_hands_off_to_sleep_sync,
+    "instant_wake_round_trip": scenario_instant_wake_round_trip,
+    "instant_wake_without_sync_deep_sleeps": scenario_instant_wake_without_sync_deep_sleeps,
+    "instant_wake_keeps_pin_lock": scenario_instant_wake_keeps_pin_lock,
+    "instant_wake_after_auto_sleep": scenario_instant_wake_after_auto_sleep,
     "highlight_pull": scenario_highlight_pull,
     "highlight_push": scenario_highlight_push,
     "highlight_push_backlog": scenario_highlight_push_backlog,
@@ -3159,6 +3362,21 @@ SCENARIOS = {
     "series_next_download": scenario_series_next_download,
 }
 
+# Scenarios for a feature only some boards build. On another board they are skipped, not run:
+# there, they would only show that the feature is missing.
+BOARD_ONLY = {
+    "home_download_returns_home": PSRAM_SIM_ENVS,
+    "series_next_download": PSRAM_SIM_ENVS,
+    "sleep_sync_downloads_missing_books": PSRAM_SIM_ENVS,
+    "sleep_sync_home_before_downloads": PSRAM_SIM_ENVS,
+    "sleep_sync_recent_books_unchanged": PSRAM_SIM_ENVS,
+    "instant_wake_hands_off_to_sleep_sync": INSTANT_WAKE_SIM_ENVS,
+    "instant_wake_round_trip": INSTANT_WAKE_SIM_ENVS,
+    "instant_wake_without_sync_deep_sleeps": INSTANT_WAKE_SIM_ENVS,
+    "instant_wake_keeps_pin_lock": INSTANT_WAKE_SIM_ENVS,
+    "instant_wake_after_auto_sleep": INSTANT_WAKE_SIM_ENVS,
+}
+
 
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
@@ -3174,9 +3392,18 @@ def main() -> int:
         print(f"Simulator binary missing: {PROGRAM}\nRun: pio run -e simulator", file=sys.stderr)
         return 2
 
+    unknown = set(BOARD_ONLY) - set(SCENARIOS)
+    if unknown:
+        print(f"BOARD_ONLY names no scenario: {sorted(unknown)}", file=sys.stderr)
+        return 2
+
     names = [args.scenario] if args.scenario else sorted(SCENARIOS)
     failures = 0
     for name in names:
+        boards = BOARD_ONLY.get(name)
+        if boards is not None and SIM_ENV not in boards:
+            print(f"SKIP {name} (needs {' or '.join(sorted(boards))}; this is {SIM_ENV})")
+            continue
         start = time.monotonic()
         try:
             SCENARIOS[name](args.verbose)
