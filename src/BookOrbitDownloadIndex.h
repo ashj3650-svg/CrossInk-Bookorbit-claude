@@ -55,11 +55,6 @@ void findPaths(const std::string* paths, size_t n, bool* outClaimed);
 // findPaths() for one path.
 bool hasPath(const std::string& path);
 
-// Visits every recorded download whose file is still there, unchanged. This is what
-// lets the catalog list its own downloads wherever the server's file naming template
-// filed them, without walking the card. visit must not call back into the index.
-void forEachExisting(void (*visit)(int64_t bookId, const std::string& path, void* context), void* context);
-
 // The catalog book a recorded download at this exact path came from. Unlike lookup(), the
 // file's size is not checked: the caller is about to replace that copy, typically because
 // the server's file changed after it was downloaded.

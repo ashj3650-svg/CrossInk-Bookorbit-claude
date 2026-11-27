@@ -584,21 +584,6 @@ bool BookOrbitDownloadIndex::hasPath(const std::string& path) {
   return claimed;
 }
 
-void BookOrbitDownloadIndex::forEachExisting(void (*visit)(int64_t, const std::string&, void*), void* context) {
-  if (visit == nullptr) return;
-  Reader in;
-  if (in.open() != Reader::State::Open) return;
-  uint32_t index = 0;
-  Record record{};
-  std::string path;  // reused: one allocation for the whole listing, not per entry
-  while (in.next(index, record)) {
-    if (!in.readPath(record, path)) break;
-    const uint32_t size = fileSizeOf(path);
-    if (size == 0 || size != record.fileSize) continue;
-    visit(record.bookId, path, context);
-  }
-}
-
 bool BookOrbitDownloadIndex::bookIdForPath(const std::string& path, int64_t& outBookId) {
   Reader in;
   if (in.open() != Reader::State::Open) return false;
