@@ -10,6 +10,7 @@
 #include <Memory.h>
 
 #include <algorithm>
+#include <iterator>
 
 #include "BookOrbitHomeLayout.h"
 #include "BookOrbitHomeText.h"
@@ -66,7 +67,7 @@ bool sameSlot(const CachedCover& cover, const char* path, const Rect& slot, cons
 }  // namespace
 
 void BookOrbitHomeTiles::releaseCoverCache() {
-  for (CachedCover& cover : gCoverCache) cover = CachedCover{};
+  std::fill(std::begin(gCoverCache), std::end(gCoverCache), CachedCover{});
 }
 
 std::string BookOrbitHomeTiles::coverPath(const RecentBook& book, const int width, const int height) {

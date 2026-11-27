@@ -4,6 +4,9 @@
 #include <HalStorage.h>
 #include <Logging.h>
 
+#include <iterator>
+#include <numeric>
+
 namespace DevicePinStore {
 namespace {
 
@@ -32,10 +35,8 @@ uint32_t hashOf(const uint32_t salt, const uint8_t (&digits)[PIN_LENGTH]) {
   for (int i = 0; i < static_cast<int>(sizeof(salt)); i++) {
     hash = (hash ^ static_cast<uint8_t>(salt >> (8 * i))) * 16777619u;
   }
-  for (const uint8_t digit : digits) {
-    hash = (hash ^ digit) * 16777619u;
-  }
-  return hash;
+  return std::accumulate(std::begin(digits), std::end(digits), hash,
+                         [](const uint32_t h, const uint8_t digit) { return (h ^ digit) * 16777619u; });
 }
 
 bool load(Record& out) {

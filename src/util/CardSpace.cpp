@@ -39,6 +39,8 @@ void usage(uint64_t& total, uint64_t& used) {
     gUsage.changes = library::libraryChangeCount();
     gUsage.total = 0;
     gUsage.used = 0;
+    // Read only by the LOG_DBG below, which some builds compile out.
+    // cppcheck-suppress unreadVariable
     const unsigned long start = millis();
 #ifndef SIMULATOR
     if (isQuickToCount()) {
