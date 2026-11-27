@@ -16,7 +16,6 @@
 #include "components/icons/syncIcons.h"
 #include "fontIds.h"
 #include "network/HomeWifi.h"
-#include "network/ReadingSyncUpload.h"
 
 namespace fui = freeink::ui;
 
@@ -75,12 +74,13 @@ bool entryVisible(const NetworkMode mode) {
 #endif
     case NetworkMode::NEARBY_STATS_SYNC:
       return SETTINGS.shouldTrackReadingStats();
+    // No Sync Server section in this fork's File Transfer: BookOrbit Sync covers progress,
+    // stats and highlights, and Settings has no Sync Server screen. A KOReader account
+    // saved on the card before v2.0.0 would otherwise bring these rows back.
     case NetworkMode::SYNC_BOOKS:
-      return ReadingSyncUpload::syncEntriesOffered();
     case NetworkMode::SYNC_READING_STATS:
-      return ReadingSyncUpload::canSyncReadingStats();
     case NetworkMode::SYNC_CLIPPINGS:
-      return ReadingSyncUpload::canSyncClippings();
+      return false;
     default:
       return true;
   }
@@ -90,6 +90,8 @@ StrId sectionHeading(const MenuSection section) {
   return section == MenuSection::Nearby ? StrId::STR_NEARBY_DEVICE : StrId::STR_SYNC_SERVER;
 }
 }  // namespace
+
+bool NetworkModeSelectionActivity::offersMode(const NetworkMode mode) { return entryVisible(mode); }
 
 NetworkModeSelectionActivity::NetworkModeSelectionActivity(GfxRenderer& renderer, MappedInputManager& mappedInput)
     : Activity("NetworkModeSelection", renderer, mappedInput), ui(renderer) {}
