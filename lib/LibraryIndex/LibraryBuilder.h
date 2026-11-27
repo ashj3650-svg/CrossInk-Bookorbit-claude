@@ -124,6 +124,9 @@ void invalidateLibraryIndex();
 // space) can tell whether books changed since, even after the index was rebuilt.
 uint32_t libraryChangeCount();
 bool libraryIndexNeedsRefresh();
+// Changes when known book paths change or Library reconciles the card.
+uint32_t libraryPathRevision();
+void resetLibraryPathRevision();
 // Boot-only: called after validating a clean scan retained across deep sleep.
 void restoreLibraryIndexAfterSleep();
 

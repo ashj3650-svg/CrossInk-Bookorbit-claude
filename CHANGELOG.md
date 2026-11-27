@@ -7,6 +7,8 @@ on; for everything inherited from upstream, see the
 
 ## [Unreleased]
 
+Based on CrossInk v2.0.0, by way of CrossInk-Bookorbit v2.0.0+bookorbit.1, which this fork now includes (Plugins, language packs, resumable catalog downloads, OPDS under File Transfer and the rest of that release, below).
+
 ### Added
 
 - **Instant Wake** (X4 Classic), in Settings > System > Device (60 minutes by default): for the time you choose after the reader goes to sleep, it only light-sleeps and keeps everything in memory, so Power brings it back without a restart. The sleep screen, your saved place and the PIN lock work as before. Nothing syncs during that time. When it is up, the reader finishes going to sleep the usual way: with Sync on Sleep on it syncs your books, the BookOrbit Home and the missing-book downloads behind the sleep screen, then deep-sleeps, so BookOrbit hears about your reading up to that long after you put the reader down. Light sleep uses more battery than deep sleep, which is why it ends after the chosen time. Choose 15 to 180 minutes in steps of 15, or Off to have every sleep be a deep sleep, as before.
@@ -40,6 +42,8 @@ on; for everything inherited from upstream, see the
 - The sleep sync is quicker for your other recent books: a book that neither this reader nor the server moved since its last sync is now checked from its saved position alone, without opening the book.
 - With Wi-Fi at Home on, File Transfer no longer lists Join a Network and Calibre Wireless, which the web page above replaces. Create Hotspot, USB Drive and the Nearby Device entries stay. Turning Wi-Fi at Home off brings them back.
 - Joining a saved Wi-Fi network no longer shows the Wi-Fi networks screen while it scans and connects: the screen you came from stays up, and the Wi-Fi screen appears only when no saved network answers (or when you press Confirm to pick one). A screen opened while Wi-Fi at Home is already connected uses that connection straight away.
+- Background catalog downloads now pause instead of starting over: when you open a book's details or another page while one is downloading, the download stops for that page and then carries on from where it was, on BookOrbit servers that support resuming (3.4 and newer). An older server starts that book again.
+- The background-download, Next in series, Instant Wake and sleep sync screens and features carry over to the CrossInk v2.0.0 catalog. With a language pack installed, the screens this fork added stay in English.
 - A BookOrbit Home shelf book that is not on the card downloads in the background while Wi-Fi at Home is connected (X4 Classic, X4 Pro and reTerminal Sticky): a short "Downloading..." notice instead of the downloading screen, then a notice when it is in. The reader stays awake meanwhile, opening a book lets it finish, and sleeping cancels it.
 
 ### Fixed
@@ -49,6 +53,35 @@ on; for everything inherited from upstream, see the
 - The BookOrbit Home's own sync (the BookOrbit tile's "Synced ... ago", reading stats, shelves and Also Reading) did not always happen in the sync behind the sleep screen: it ran last, after Download New Books, so waking the reader while books were still downloading skipped it. It now runs right after the reading positions and before the downloads, and the books a download brings in are then added to New on your reader. The tile counts from when the reader went to sleep, so after a night it reads e.g. "Synced 8 h ago" even though the sync worked.
 - The sync behind the sleep screen did nothing when the last book you opened was not an EPUB, or was no longer on the card. It now still syncs your other recent books, the BookOrbit Home and new-book downloads, when the BookOrbit theme or Download New Books is on.
 - The sync behind the sleep screen skipped a book that had never been synced before (no record of a previous sync, and no date for this reader's position, as when it was opened before the clock was set). Such a book now takes the further of the two positions.
+
+## [v2.0.0+bookorbit.1] - 2026-11-26
+
+Based on CrossInk v2.0.0.
+
+### Added
+
+- Releases now include a firmware for the BOOX Picco. It installs over USB into the reader's application slot and leaves the factory recovery software untouched; see [Installation](docs/installation.md#boox-picco). As on upstream CrossInk, Picco has no Wi-Fi or SD card firmware update.
+
+### Changed
+
+- Interface languages other than English are no longer built into the firmware: CrossInk v2.0.0 moved them out to make room. This fork publishes its own language packs, so **Settings > System > Device > Download Languages** installs them over Wi-Fi, and after the update What's New offers to download the language you were using. Upstream's packs cannot be used here: they lack this fork's screens. Each release also carries `crossink-languages-<version>.zip` for installing them from the SD card instead.
+- The BookOrbit screens, sync messages and Home theme are now translated into the 34 languages CrossInk v2.0.0 offers besides English, not only the 8 this fork covered before. Each language pack must stay under 64 KB on the reader, so Bulgarian, whose pack is nearly full with CrossInk's own text, gets the Home theme and the main menus only, and a few long messages stay in English in Ukrainian, Kazakh, Russian and Belarusian: the clock prompt and some rare server errors.
+- The OPDS browser moves from Home to File Transfer, as in CrossInk v2.0.0, to make room for Plugins. The BookOrbit catalog stays on Home; on the Cover Grid home screen its tab now sits next to Plugins.
+- The Xteink X3 and X4 no longer have an OPDS browser: CrossInk v2.0.0's latest changes no longer fit on them alongside BookOrbit, and the BookOrbit catalog covers the same need. Its File Transfer entry, its settings and its section of the web settings page are gone on these two readers; saved OPDS servers stay on the SD card. The X4 Pro, X4 Classic, Sticky, Picco and EEGO A4 keep it.
+- A book download from the BookOrbit catalog now reserves room for the largest piece of secure data the way CrossInk v2.0.0 does for OPDS books: once the request is sent, while memory is still in one piece. A server that agrees to small pieces, as most nginx and Apache setups do, no longer costs that reservation at all ([#96](https://github.com/agosez/CrossInk-Bookorbit/issues/96)).
+- A BookOrbit book download that loses its connection now picks up where it stopped instead of starting over, with BookOrbit 3.4.0 or later, and only gives up after three attempts in a row that bring nothing more of the book. It used to give up after three failed attempts, even when each one had got further, and every new attempt downloaded the whole book again. What a failed download received also stays on the card, and so does what a reset or a flat battery interrupted: the next download of that book continues from there. The card keeps this for one book at a time, and cancelling a download discards it. This covers the catalog, Home's shelves and the book updates a sync offers. If the book changes on the server in the meantime, the download starts over rather than mixing the two versions.
+- On the X3 and X4, the BookOrbit catalog now remembers where up to 2048 downloaded books landed, up from 512, as the X4 Pro and reTerminal Sticky already did. Beyond 512, older books filed in the server's series folders used to lose their on-device dot and drop out of "On device"; they now keep both. The reader no longer holds that list in memory while you browse the catalog: each page, Home's shelves and each step of the card scan look their books up on the SD card, all at once.
+- KOReader Sync, which CrossInk v2.0.0 renames Sync Server and extends to reading stats and clippings, stays out of this fork, and so do its new Sync Book, Sync Folder and Sync Books actions. A KOReader account saved before this fork removed it keeps them.
+
+### Fixed
+
+- Shortcuts set to BookOrbit Sync keep working after this update. CrossInk v2.0.0 gives the numbers they were saved under to Back Home and Home/Reader, so they are carried over the first time the device starts, on every button that offers BookOrbit Sync, the Home key and Quick Actions included.
+- BookOrbit Sync no longer sends a guessed position when the device cannot place the page within the book's structure: the sync stops with an error instead. A guessed position could send another reader to the wrong place, or to the start of the book.
+- Download Languages and Hyphenation Packs work on the X3 and X4. The download failed every time after a minute of waiting: with Wi-Fi on, the reader had too little memory left for the secure connection it opened. It now uses the lighter one that BookOrbit Sync and font downloads already use, as CrossInk v2.0.0-RC also fails there ([CrossInk#927](https://github.com/uxjulia/CrossInk/issues/927)).
+
+### Security
+
+- Language and hyphenation catalogs are now signed by this fork's release workflow, and the reader refuses one whose signature does not hold. The signature also covers the license and source indexes each pack comes with, so every file a language or hyphenation download writes to the SD card is checked against it, whatever the connection it arrived over.
 
 ## [v1.6.1+bookorbit.10] - 2026-11-25
 

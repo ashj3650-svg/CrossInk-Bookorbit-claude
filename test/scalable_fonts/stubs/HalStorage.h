@@ -20,6 +20,8 @@ class HalFile {
  public:
   std::FILE* file = nullptr;
   HalFile() = default;
+  bool allocationFailed() const { return false; }
+  explicit operator bool() const { return file != nullptr; }
   HalFile(const HalFile&) = delete;
   HalFile& operator=(const HalFile&) = delete;
   HalFile(HalFile&& other) : file(std::exchange(other.file, nullptr)) {}
@@ -57,6 +59,11 @@ class HalFile {
   size_t write(const void* bytes, size_t count) { return file ? std::fwrite(bytes, 1, count, file) : 0; }
 };
 inline struct StorageStub {
+  HalFile open(const char* path) {
+    HalFile file;
+    openFileForRead("TTF", path, file);
+    return file;
+  }
   bool openFileForRead(const char*, const char* path, HalFile& file) {
     file.close();
     file.file = std::fopen(path, "rb");

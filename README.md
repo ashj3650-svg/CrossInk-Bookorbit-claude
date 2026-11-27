@@ -2,7 +2,9 @@
 
 Everything else — fonts, themes, reader features, reading stats, controls, the web server — comes from CrossInk unchanged, with one exception: KOReader Sync is removed to make room (see below). See the [upstream README](https://github.com/uxjulia/CrossInk#readme) for those, and the [docs](./docs/) folder in this repository for the detailed guides.
 
-**Note**: this fork is built and tested for the **Xteink X4 Classic**. The code still builds for the Xteink X3, X4 and X4 Pro and the Seeed reTerminal Sticky, but those are not tested here.
+**Note**: this fork is built and tested for the **Xteink X4 Classic**. The code still builds for the Xteink X3, X4 and X4 Pro, the Seeed reTerminal Sticky, the BOOX Picco and the EEGO Reader A4, but those are not tested here.
+
+It is based on **CrossInk v2.0.0**, by way of the [CrossInk-Bookorbit](https://github.com/agosez/CrossInk-Bookorbit) fork's v2.0.0+bookorbit.1, whose changes it takes in full (see [What came with CrossInk v2.0.0](#what-came-with-crossink-v200)), with this fork's own extras on top.
 
 ---
 
@@ -15,7 +17,8 @@ Everything else — fonts, themes, reader features, reading stats, controls, the
 - **Reading statistics pushed to BookOrbit** — your reading time, streaks and pace on the server's dashboard, fed by the pages you turn on the device.
 - **A working clock on the X4** — the status-bar clock, which upstream can only show on hardware that has a clock chip, plus an opt-in mode that keeps the time running through sleep.
 - **Reading and device extras** — a "Previously..." recap after time away, a pinned Peek Page, a sleep timer counted in chapters, the next book of a series at the end of a book, Wi-Fi at Home, a sleep sync that covers every recent book and downloads the missing ones, Instant Wake, a startup PIN lock, Battery Use figures, a Search button on the BookOrbit Home and a round of speed work (see [Extras](#extras) below).
-- **KOReader Sync is removed** — its screens, settings and shortcut are gone. The X3/X4 firmware gets a 6.5 MB partition, and this fork's BookOrbit layer plus CrossInk's own growth stopped fitting in it; dropping the second sync provider is what buys the room. Credentials already saved on the SD card are left alone, simply unread.
+- **KOReader Sync is removed** — CrossInk v2.0.0 renamed it Sync Server and added reading-stats and clippings sync to it; its screens, settings, shortcut and sync actions (Sync Book, Sync Folder, Sync Books) are gone. The X3/X4 firmware gets a 6.5 MB partition, and this fork's BookOrbit layer plus CrossInk's own growth stopped fitting in it; dropping the second sync provider is what buys the room. Credentials already saved on the SD card are left alone: an account set up before the removal keeps the sync actions, but cannot be changed on the device.
+- **No OPDS browser on the X3 and X4** — CrossInk v2.0.0's later changes no longer fit in that same partition alongside BookOrbit, so the X3/X4 firmware leaves out the OPDS browser; the BookOrbit catalog covers the same need. The X4 Classic and the other boards keep it, under File Transfer.
 
 BookOrbit exposes a KOReader-compatible sync API, so this fork talks to it the same way the official BookOrbit KOReader plugin does. Your BookOrbit server must be recent enough to serve the KOReader plugin endpoints under `{server}/api/v1/koreader` — including `plugin/catalog/*` for the catalog browser and `plugin/annotations/*` / `plugin/bookmarks/*` for highlight and bookmark sync (servers without those are detected, and the missing steps are simply skipped).
 
@@ -39,7 +42,7 @@ _Screenshots taken in the simulator, with public-domain books from [Standard Ebo
 
 ## Extras
 
-These come with v1.6.1+bookorbit.10 and later; the newest are in the [changelog](CHANGELOG.md)'s Unreleased section, which has the details of each.
+These came with v1.6.1+bookorbit.10 and later and carry on in the v2.0.0-based firmware; the [changelog](CHANGELOG.md)'s Unreleased section has the details of each.
 
 ### Reading
 
@@ -55,7 +58,7 @@ These come with v1.6.1+bookorbit.10 and later; the newest are in the [changelog]
 - **Sync on open** — opening a book with Wi-Fi at Home connected first fetches its latest BookOrbit position.
 - **Sleep sync for recent books** — the sync behind the sleep screen covers up to 10 recent books, and the most recently saved position wins.
 - **Download Missing Books** — the sleep sync downloads every book of your BookOrbit library that is not on the card, newest first (Settings → BookOrbit Sync). A book you delete from the card stays deleted. It stops when the card is nearly full or the battery is below 15%. The **Just downloaded** shelf on the Library page shows the newest ones, so you can see what arrived and open it from there.
-- **Background downloads** — downloads from the catalog run while you keep browsing, and a BookOrbit Home shelf book that is not on the card downloads behind a short notice while Wi-Fi at Home is connected.
+- **Background downloads** — downloads from the catalog run while you keep browsing, and a BookOrbit Home shelf book that is not on the card downloads behind a short notice while Wi-Fi at Home is connected. They resume the way every BookOrbit download now does: a download paused while you open another listing picks up from the bytes it already has.
 
 ### Speed
 
@@ -76,6 +79,19 @@ Index ahead, Next page ready and covers from memory need the extra memory of the
 - **Search** — the BookOrbit Home's Search button (Up from the current book) opens the Library on its search keyboard; in the Library, Right is Search. Searches match titles, authors and series.
 - **Battery Use** — Settings → System → Device → Battery Use shows the drain asleep (per day), awake (per hour) and per sleep sync.
 - **Ashad's Books** — the boot screen and the plain sleep screen show "Ashad's Books" with an open book logo, and the reader is called ashadsbook on your network (http://ashadsbook.local/, AshadsBook-… in the router's list).
+
+---
+
+## What came with CrossInk v2.0.0
+
+The update to CrossInk v2.0.0 (with CrossInk-Bookorbit's v2.0.0+bookorbit.1) brings everything upstream added since v1.6.1, alongside this fork's extras. The ones you will notice most:
+
+- **Plugins** — a Plugins entry on Home, for the add-ons CrossInk v2.0.0 can download and run. The OPDS browser moved from Home to File Transfer to make room.
+- **Language packs** — only English is built into the firmware now. Settings → System → Device → Download Languages installs another language over Wi-Fi. The packs come from CrossInk-Bookorbit, so this fork's own screens (Instant Wake, Device PIN, Battery Use and the others) stay in English in them.
+- **Resumable BookOrbit downloads** — with BookOrbit 3.4.0 or later, a download that loses its connection carries on from where it stopped, and only gives up after three attempts in a row that bring nothing more. What it received stays on the card for the next try at that book, even across a reset or a flat battery; cancelling discards it.
+- **Safer reading progress** — the reader keeps two copies of each book's position and uses the newer one that reads back whole, so a reset mid-save no longer sends a book back to its start.
+- **Shortcuts kept** — shortcuts set to BookOrbit Sync, Peek Page or Sleep at Chapter End keep working after the update: CrossInk v2.0.0 renumbered the shortcut actions, and the saved ones are carried over the first time the reader starts.
+- **CrossInk's own v2.0.0 changes** — reader, font, theme and settings improvements; see the [CrossInk changelog](https://github.com/uxjulia/CrossInk/blob/main/CHANGELOG.md).
 
 ---
 
@@ -255,7 +271,7 @@ The root list contains:
 
 Your server's other sections (Recently Added, Libraries, Collections and SmartScopes) are not listed. To find a book by name, use the Search button on the BookOrbit Home; the Library and Browse Files open the books already on the card.
 
-In a server book list, **Confirm** downloads the book into the download folder configured in the BookOrbit settings (the SD card root by default). A download that gets interrupted resumes automatically on retry, and **Back** cancels it. Books already present on the device are marked with a dot at the end of the line, so you can tell at a glance what is worth downloading.
+In a server book list, **Confirm** downloads the book into the download folder configured in the BookOrbit settings (the SD card root by default). On the X4 Classic, X4 Pro and reTerminal Sticky the download runs behind the list, whose row shows how far it got, so you can keep browsing; elsewhere a download screen shows it, and **Back** cancels it. A download that loses its connection resumes from where it stopped (BookOrbit 3.4.0 or later), and what it received stays on the card for the next try. Books already present on the device are marked with a dot at the end of the line, so you can tell at a glance what is worth downloading.
 
 The file is named by **your server's KOReader file naming template** — BookOrbit's _Settings → Koreader → File Naming_, the same template its own KOReader plugin follows — so a book can land inside a series folder, for instance. BookOrbit resolves the template and tells the device where the file belongs; a per-device override set on the server is honoured too, and any folder it asks for is created under your download folder. If your account has no template, BookOrbit's default applies, which files books under `Series/` and `Standalone/`. Books downloaded before this behaviur existed are left where they are.
 
@@ -322,7 +338,11 @@ It also decides how faithful your uploaded reading-session timestamps are — se
 
 Download the `firmware-*.bin` for your device from **this repository's** [releases page](https://github.com/agosez/CrossInk-Bookorbit/releases) — not upstream's, which does not include BookOrbit support. CrossInk's own web installer only offers upstream builds, so flash the file as a custom firmware with the [CrossPoint flash tools](https://crosspointreader.com/#flash-tools), from the command line, or from the SD card — [Installation](./docs/installation.md) walks through each path, including USB-locked devices and reverting to upstream CrossInk.
 
-Once this firmware is installed, **Settings → System → Check for Updates** resolves against this fork's releases, so later versions arrive over the air. Devices running upstream CrossInk will not see these releases: the first install has to be done by USB or SD card.
+**Settings → System → Check for Updates** looks at CrossInk-Bookorbit's releases, which do not have this fork's extras: installing one of those replaces this firmware with theirs. Update this fork by flashing its own `.bin` over USB or from the SD card instead.
+
+### Languages
+
+Since CrossInk v2.0.0 only English is built into the firmware. **Settings → System → Device → Download Languages** installs one of CrossInk-Bookorbit's language packs over Wi-Fi; this fork's own screens stay in English in them.
 
 ## Development
 
