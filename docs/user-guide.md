@@ -384,15 +384,9 @@ Which entries you see depends on your device. Button devices show **Front Button
 
 - **OPDS Servers**: Manage one or more OPDS [(Open Publication Distribution System)](https://en.wikipedia.org/wiki/Open_Publication_Distribution_System) libraries (online book catalogs) for browsing and downloading books. See [OPDS Servers (Multiple Libraries)](#365-opds-servers-multiple-libraries) below.
 
-- **Check for Updates** and **SD Card Firmware Update**: Check for new firmware over Wi-Fi, or install a `firmware.bin` file you placed on the SD card.
+- **SD Card Firmware Update**: Install a `firmware.bin` file you placed on the SD card. (The Ashad's Books build has no Check for Updates: it would install CrossInk-Bookorbit's releases, which lack this build's features.)
 
 - **About**: Shows the device model, software version, screen, storage, and memory details. Use the buttons or swipe to scroll; **Back** returns to Settings. The figures are captured when the screen opens; reopen it for a fresh snapshot. See [Troubleshooting](./troubleshooting.md#device-information). You can also choose **Export** to save a support file (`/crossink-support.json`) to the SD card, with device and global settings alone or with the last opened EPUB's saved settings without its title or filename. Nothing is uploaded. See [export coverage and privacy](./troubleshooting.md#export-support-information).
-
-- **Include Release Candidates**: Off by default. When on, Check for Updates also
-  offers this fork's release candidates, the test builds published ahead of a
-  release, whenever one is newer than both the installed firmware and the latest
-  release. Turning it back off keeps the installed candidate until a newer
-  release comes out: the updater never installs an older version.
 
 - **Language** (in **Device**): Set the menu language. English is included. Download other interface languages on the reader or install them from SD; see [Languages](./languages.md). Text that has not been translated appears in English.
 

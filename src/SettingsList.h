@@ -627,8 +627,9 @@ inline SettingInfo buildSideButtonActionSetting(const StrId nameId, uint8_t Cros
 //
 // UI consumers own their descriptors; persistence visits and releases each entry.
 // The count is this fork's: upstream's 112 common entries less its five two-finger and
-// eight Sync Server account entries, plus the seven BookOrbit ones, the clock latch
-// toggle, the release-candidate update toggle, the recap setting and Performance Mode,
+// eight Sync Server account entries and the release-candidate update toggle (this fork has
+// no Check for Updates), plus the seven BookOrbit ones, the clock latch toggle, the recap
+// setting and Performance Mode,
 // with Wi-Fi at Home on boards with PSRAM, Instant Wake on the X4 Classic and Download
 // New Books where sleep downloads are built. Publisher Fonts is compiled only on
 // scalable-font builds; ten entries (nine two-finger and edge gestures, and Word Hold
@@ -651,7 +652,7 @@ inline constexpr size_t BASE_SETTINGS_EEGO_ENTRIES = 1;
 inline constexpr size_t BASE_SETTINGS_EEGO_ENTRIES = 0;
 #endif
 inline constexpr size_t BASE_SETTINGS_CAPACITY =
-    108 + 2 + (CROSSINK_APP_HOME_WIFI ? 1 : 0) + (CROSSINK_APP_INSTANT_WAKE ? 1 : 0) +
+    107 + 2 + (CROSSINK_APP_HOME_WIFI ? 1 : 0) + (CROSSINK_APP_INSTANT_WAKE ? 1 : 0) +
     (CROSSINK_APP_SLEEP_AUTO_DOWNLOAD ? 1 : 0) + BASE_SETTINGS_SCALABLE_FONT_ENTRIES +
     (CROSSINK_APP_CAP_TOUCH ? 10 : 0) + BASE_SETTINGS_KOREADER_ENTRIES + BASE_SETTINGS_EEGO_ENTRIES;
 
@@ -1190,9 +1191,8 @@ inline std::vector<SettingInfo> buildSystemSettingsParentList(const std::vector<
 #endif
   systemSettings.push_back(SettingInfo::Action(StrId::STR_PLUGINS, SettingAction::Plugins));
 #if !FREEINK_DEVICE_PICCO
-  // Picco retains the vendor recovery slot and has no spare application slot.
-  systemSettings.push_back(SettingInfo::Action(StrId::STR_CHECK_UPDATES, SettingAction::CheckForUpdates));
-  addSettingByName(systemSettings, allSettings, StrId::STR_OTA_INCLUDE_PRERELEASES);
+  // Picco retains the vendor recovery slot and has no spare application slot. Check for
+  // Updates is left out: it installs CrossInk-Bookorbit releases, which lack this fork.
   systemSettings.push_back(SettingInfo::Action(StrId::STR_SD_FIRMWARE_UPDATE, SettingAction::SdFirmwareUpdate));
 #endif
   systemSettings.push_back(SettingInfo::Action(StrId::STR_RELEASE_NOTES, SettingAction::ReleaseNotes));

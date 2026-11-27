@@ -358,8 +358,6 @@ void forEachBaseSetting(SettingVisitor visitor, void* context) {
       {0, CrossPointSettings::MAX_INSTANT_WAKE_MINUTES, CrossPointSettings::INSTANT_WAKE_MINUTES_STEP},
       "instantWakeMinutes", StrId::STR_CAT_SYSTEM));
 #endif
-  add(SettingInfo::Toggle(StrId::STR_OTA_INCLUDE_PRERELEASES, &CrossPointSettings::otaIncludePrereleases,
-                          "otaIncludePrereleases", StrId::STR_CAT_SYSTEM));
 
   // Frontlight quick-panel state: persisted + web-exposed, category-less so
   // it stays off the Settings screen (edited from the swipe-down panel).
