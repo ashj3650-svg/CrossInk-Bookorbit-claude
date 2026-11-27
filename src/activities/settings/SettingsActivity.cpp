@@ -214,6 +214,15 @@ std::string formatSettingValue(const SettingInfo& setting) {
              static_cast<unsigned int>(SETTINGS.*(setting.valuePtr)));
     return valueBuffer;
   }
+#if CROSSINK_APP_INSTANT_WAKE
+  if (setting.nameId == StrId::STR_INSTANT_WAKE) {
+    const uint8_t minutes = SETTINGS.getInstantWakeMinutes();
+    if (minutes == 0) return tr(STR_STATE_OFF);
+    char valueBuffer[32];
+    snprintf(valueBuffer, sizeof(valueBuffer), tr(STR_SLEEP_TIMER_VALUE_FORMAT), static_cast<unsigned int>(minutes));
+    return valueBuffer;
+  }
+#endif
   if (setting.valuePtr == &CrossPointSettings::lineHeightPercent) {
     return std::to_string(SETTINGS.*(setting.valuePtr)) + "%";
   }
@@ -1191,7 +1200,8 @@ void SettingsActivity::toggleCurrentSetting() {
     const uint8_t cur = setting.valueGetter();
     setting.valueSetter((cur + 1) % totalValues);
   } else if (setting.type == SettingType::VALUE && setting.valuePtr != nullptr) {
-    const int8_t currentValue = SETTINGS.*(setting.valuePtr);
+    // int, not int8_t: a value past 127 (Instant Wake's minutes) must not wrap negative.
+    const int currentValue = SETTINGS.*(setting.valuePtr);
     if (currentValue + setting.valueRange.step > setting.valueRange.max) {
       SETTINGS.*(setting.valuePtr) = setting.valueRange.min;
     } else {

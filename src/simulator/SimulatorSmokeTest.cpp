@@ -382,8 +382,13 @@ class SimulatorSmokeTest {
       fail("Touch gestures exposed on a button-only device");
     }
     const auto device = buildSystemDeviceSettingsList(all);
-    if (device.size() < 3 || device[1].nameId != StrId::STR_TIME_TO_SLEEP ||
-        device[2].nameId != StrId::STR_CUSTOM_BOOTSCREEN) {
+    // Instant Wake (X4 Classic) sits between Time to Sleep and Custom bootscreen.
+    constexpr size_t bootscreenIndex = CROSSINK_APP_INSTANT_WAKE ? 3 : 2;
+    if (CROSSINK_APP_INSTANT_WAKE && (device.size() < 3 || device[2].nameId != StrId::STR_INSTANT_WAKE)) {
+      fail("Instant Wake setting order mismatch");
+    }
+    if (device.size() <= bootscreenIndex || device[1].nameId != StrId::STR_TIME_TO_SLEEP ||
+        device[bootscreenIndex].nameId != StrId::STR_CUSTOM_BOOTSCREEN) {
       fail("Custom bootscreen setting order mismatch");
     }
     JsonDocument original;

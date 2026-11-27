@@ -279,6 +279,12 @@ const std::vector<SettingInfo>& getBaseSettingsList() {
 #endif
     add(SettingInfo::Toggle(StrId::STR_PERFORMANCE_MODE, &CrossPointSettings::performanceMode, "performanceMode",
                             StrId::STR_CAT_SYSTEM));
+#if CROSSINK_APP_INSTANT_WAKE
+    add(SettingInfo::Value(
+        StrId::STR_INSTANT_WAKE, &CrossPointSettings::instantWakeMinutes,
+        {0, CrossPointSettings::MAX_INSTANT_WAKE_MINUTES, CrossPointSettings::INSTANT_WAKE_MINUTES_STEP},
+        "instantWakeMinutes", StrId::STR_CAT_SYSTEM));
+#endif
     add(SettingInfo::Toggle(StrId::STR_OTA_INCLUDE_PRERELEASES, &CrossPointSettings::otaIncludePrereleases,
                             "otaIncludePrereleases", StrId::STR_CAT_SYSTEM));
 

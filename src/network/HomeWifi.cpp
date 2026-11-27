@@ -352,6 +352,9 @@ void HomeWifi::onActivityEntering(const bool isHome, const bool isReader) {
 void HomeWifi::stop(const char* reason) {
   stopForBook = false;
   attemptScheduled = false;
+  // The next Home is an arrival, which schedules the join again: after Instant Wake's light
+  // sleep Home comes back without this program ever seeing it left.
+  wasOnHome = false;
   if (owningRadio()) {
     radioDown(reason);
   } else if (state == State::Released) {

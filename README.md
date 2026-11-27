@@ -65,6 +65,7 @@ Index ahead, Next page ready and covers from memory need the extra memory of the
 - **Covers from memory** — the BookOrbit Home keeps the covers it drew in PSRAM until you open a book.
 - **Faster covers and Wi-Fi** — covers decode at a reduced size for thumbnails, and Wi-Fi joins your router directly instead of scanning every channel.
 - **Performance Mode** — Settings → System → Performance Mode (on by default) keeps full CPU speed and quick button checks while the reader is on; turn it off for longer battery life.
+- **Instant Wake** (X4 Classic) — Settings → System → Device → Instant Wake (60 minutes by default). For that long after it goes to sleep, the reader keeps everything in memory, so Power brings it straight back without a restart. Then it finishes going to sleep: the sleep sync (when Sync on Sleep is on), then deep sleep. Off makes every sleep a deep sleep.
 
 ### Device
 
@@ -142,6 +143,7 @@ Turn on **Settings → System → BookOrbit Sync → Sync on Sleep** and the dev
 - **Progress follows the Smart sync rules**, whatever **Sync Behavior** says, because nobody is there to answer the choice screen. When those rules cannot decide (the first sync of a book on this device, or both sides having moved), progress is left alone for your next manual sync. Highlights, bookmarks and reading sessions sync either way.
 - **The BookOrbit Home syncs too**, under the BookOrbit theme: right after the reading positions, and before any book downloads, the sync refreshes what the BookOrbit tile's **Sync now** brings (stats, shelves, Also Reading). The tile then counts from the moment the device went to sleep.
 - **It is skipped** when no Wi-Fi network is saved, and when the battery is below 10% with no charger connected. With no EPUB open, it still runs for the BookOrbit Home and Download Missing Books when either is on.
+- **With Instant Wake on** (X4 Classic), the sync waits until the reader has been asleep for the Instant Wake time, so that a quick nap wakes instantly. A wake before then skips the sync; it runs at the end of the next sleep that lasts that long.
 
 Each sync keeps Wi-Fi on for a few seconds, and longer when no saved network answers, so the option is off by default.
 

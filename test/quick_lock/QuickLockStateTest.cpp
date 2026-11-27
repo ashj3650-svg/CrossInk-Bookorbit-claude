@@ -72,6 +72,23 @@ TEST(ButtonShortcutController, LongPowerRequiresReleaseBeforeItCanUnlock) {
   EXPECT_FALSE(controller.isQuickLocked());
 }
 
+TEST(ButtonShortcutController, ResetQuickLockStartsUnlockedLikeABoot) {
+  ButtonShortcutController controller;
+
+  controller.toggleQuickLock(10U, QuickLockTrigger::LongPower, true);
+  ASSERT_TRUE(controller.isQuickLocked());
+  controller.resetQuickLock();
+  EXPECT_FALSE(controller.isQuickLocked());
+  EXPECT_EQ(controller.quickLockTrigger(), QuickLockTrigger::None);
+  // A reset lock is not timing towards a Quick Lock sleep any more.
+  EXPECT_FALSE(controller.shouldQuickLockSleep(10U + 60U * 60U * 1000U, 60U * 1000U));
+  // And locking works as usual afterwards, unlocking with its own trigger.
+  controller.toggleQuickLock(20U, QuickLockTrigger::ShortPower);
+  EXPECT_TRUE(controller.isQuickLocked());
+  EXPECT_TRUE(controller.tryUnlockWithTrigger(21U, QuickLockTrigger::ShortPower));
+  EXPECT_FALSE(controller.isQuickLocked());
+}
+
 TEST(ButtonShortcutController, HomeQuickLockOnlyUnlocksWithTheMatchingHomeGesture) {
   ButtonShortcutController controller;
 

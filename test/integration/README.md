@@ -79,7 +79,18 @@ python3 test/integration/harness/run_scenarios.py
 
 # one scenario, verbose
 python3 test/integration/harness/run_scenarios.py --scenario sync_progress_pull -v
+
+# the X4 Classic build, for the PSRAM-board and Instant Wake scenarios
+pio run -e x4-classic-simulator
+CROSSINK_SIM_PROGRAM=.pio/build/x4-classic-simulator/program \
+  python3 test/integration/harness/run_scenarios.py
 ```
+
+Some scenarios cover a feature only some boards build: background downloads and
+recent-book sync (PSRAM boards) or Instant Wake (X4 Classic). `BOARD_ONLY` in the
+harness lists them; on any other simulator they print `SKIP` rather than run. The
+board is read from the program's `.pio/build/<env>/program` path, or from
+`CROSSINK_SIM_ENV` when the binary lives elsewhere.
 
 `docker compose ... down -v` resets the server completely; `seed.py` starts
 from a database it recognizes as already seeded without duplicating anything.
@@ -128,6 +139,11 @@ that spelling to the step's markers.
 | `sleep_sync_conflict` | The guard on the scenario above: the peer device read past the position this device last synced, and this device read on too. The sleep sync leaves both positions and its own history untouched. |
 | `sleep_sync_keeps_progress_reset` | The other guard: the book's progress is reset in BookOrbit, which the server serves as the start of the book dated now, under the same `bookorbit-web` id as a web reader save. The device is further on, but the sleep sync does not upload over the reset, which the server would accept and then ignore; the reset is still served afterwards. |
 | `sleep_sync_cancel` | A Power press during the sleep sync cancels it and boots the device the way a power-button wake does. |
+| `instant_wake_hands_off_to_sleep_sync` | Instant Wake (x4-classic-simulator, its minutes shortened through `CROSSINK_SIM_INSTANT_WAKE_MS`): the sleep starts as a light sleep with no sync, and only once its time is up does the device restart into the sleep sync, which uploads the further local position. |
+| `instant_wake_round_trip` | The whole cycle in one process: asleep in the book, Power wakes it back into the reader without a restart or a sync; asleep again, the time runs out and the sleep sync uploads the position. |
+| `instant_wake_without_sync_deep_sleeps` | With Sync on Sleep off, the end of the light sleep goes straight to deep sleep, proven by the press that then relaunches the simulator as a power-button wake. |
+| `instant_wake_keeps_pin_lock` | A wake from the light sleep lands on the Device PIN lock when a PIN is set, not on Home. |
+| `instant_wake_after_auto_sleep` | The inactivity timer's sleep (with Quick Resume after a timeout) is a light sleep too; Power reopens the book and the timer starts again instead of sleeping at once. |
 | `highlight_pull` | A highlight created by the peer device lands in the local clipping store, with a minted position record. |
 | `highlight_push` | A pre-seeded local highlight (clipping + position record, what the reader persists) reaches the server and is offered to a device that never saw it. |
 | `highlight_push_backlog` | Twenty local highlights, listed out of datetime order, reach the server in one sync (batches of 8 on one session), and the watermark ends on the newest. |

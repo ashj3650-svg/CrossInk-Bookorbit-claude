@@ -520,6 +520,11 @@ class CrossPointSettings : public PersistableStore<CrossPointSettings> {
   // after 3 seconds without a press. Page turns start sooner; the battery drains faster
   // while the reader is awake (sleep is unaffected).
   uint8_t performanceMode = 1;
+  // Instant Wake (X4 Classic): for this many minutes after the device goes to sleep it
+  // only light-sleeps, keeping its memory, so Power brings it back without a restart.
+  // When the time is up it runs the usual sleep (BookOrbit sleep sync included) and
+  // deep-sleeps. 0 turns it off: every sleep is a deep sleep, as before. Steps of 15.
+  uint8_t instantWakeMinutes = 60;
   // Let Check for Updates offer this fork's release candidates (GitHub pre-releases) as well
   // as its final releases. Off by default: candidates are test builds.
   uint8_t otaIncludePrereleases = 0;
@@ -744,6 +749,8 @@ class CrossPointSettings : public PersistableStore<CrossPointSettings> {
   static constexpr uint8_t MIN_SLEEP_TIMEOUT_MINUTES = 1;
   static constexpr uint8_t SLEEP_TIMEOUT_NEVER_MINUTES = 31;
   static constexpr uint8_t MAX_SLEEP_TIMEOUT_MINUTES = SLEEP_TIMEOUT_NEVER_MINUTES;
+  static constexpr uint8_t INSTANT_WAKE_MINUTES_STEP = 15;
+  static constexpr uint8_t MAX_INSTANT_WAKE_MINUTES = 180;
   static constexpr uint8_t SD_FONT_MAX_SIZE_STEPS = 8;
   static constexpr uint8_t MIN_READER_FONT_POINT_SIZE = 8;
   static constexpr uint8_t MIN_LINE_HEIGHT_PERCENT = 70;
@@ -834,6 +841,8 @@ class CrossPointSettings : public PersistableStore<CrossPointSettings> {
  public:
   float getReaderLineCompression() const;
   unsigned long getSleepTimeoutMs() const;
+  // Instant Wake's light-sleep stretch in minutes, a whole number of steps; 0 is off.
+  uint8_t getInstantWakeMinutes() const;
   int getRefreshFrequency() const;
 };
 
