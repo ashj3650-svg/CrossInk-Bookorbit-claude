@@ -6,6 +6,7 @@
 #include "AppCapabilities.h"
 #include "CrossPointSettings.h"
 #include "MappedInputManager.h"
+#include "OpdsServerStore.h"
 #include "components/TouchHeaderBackButton.h"
 #include "components/UITheme.h"
 #include "components/UIThemeTokens.h"
@@ -66,6 +67,12 @@ bool entryVisible(const NetworkMode mode) {
     case NetworkMode::JOIN_NETWORK:
     case NetworkMode::CONNECT_CALIBRE:
       return !(CROSSINK_APP_HOME_WIFI && SETTINGS.wifiAtHome);
+#if CROSSINK_APP_CAP_OPDS
+    // This fork keeps File Transfer to the transfers themselves: the OPDS browser shows
+    // only once a server is saved (Settings > System > OPDS Servers), as it did on Home.
+    case NetworkMode::OPDS_BROWSER:
+      return OPDS_STORE.hasServers();
+#endif
     case NetworkMode::NEARBY_STATS_SYNC:
       return SETTINGS.shouldTrackReadingStats();
     case NetworkMode::SYNC_BOOKS:
