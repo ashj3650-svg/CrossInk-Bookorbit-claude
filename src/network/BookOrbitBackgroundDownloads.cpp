@@ -64,21 +64,15 @@ Result runRequest(const BookOrbitBackgroundDownloads::Request& request, std::str
   BookOrbitBookDetail detail;
   if (!BookOrbitCatalogClient::fetchBookDetail(request.bookId, detail)) return Result::Unreachable;
   BookOrbitCatalogFile epubFile;
-  if (!BookOrbitBookDownload::hasEpubFile(detail, epubFile)) return Result::NoEpub;
+  if (!BookOrbitCatalogDownload::findEpubFile(detail, epubFile)) return Result::NoEpub;
 
-  outPath =
-      request.replacePath.empty() ? BookOrbitBookDownload::catalogBookPath(detail, epubFile) : request.replacePath;
-  if (request.takeExisting && epubFile.sizeBytes > 0) {
-    FsFile existing = Storage.open(outPath.c_str());
-    const bool same = existing && !existing.isDirectory() && existing.fileSize64() == epubFile.sizeBytes;
-    existing.close();
-    if (same) return Result::AlreadyOnCard;
-  }
-  if (!BookOrbitBookDownload::ensureParentFolder(outPath)) return Result::Failed;
+  outPath = request.replacePath.empty() ? BookOrbitCatalogDownload::destination(detail, epubFile) : request.replacePath;
+  if (request.takeExisting && BookOrbitCatalogDownload::isAlreadyAt(outPath, epubFile)) return Result::AlreadyOnCard;
+  if (!BookOrbitCatalogDownload::makeFolders(outPath)) return Result::Failed;
 
-  BookOrbitBookDownload::prepareTransfer(outPath);
+  BookOrbitCatalogDownload::prepare(outPath);
   int shownPercent = 0;
-  const HttpDownloader::ProgressCallback progress = [&shownPercent](const size_t downloaded, const size_t total) {
+  HttpDownloader::ProgressCallback progress = [&shownPercent](const size_t downloaded, const size_t total) {
     if (total == 0) return;
     const int percent = static_cast<int>(static_cast<uint64_t>(downloaded) * 100 / total);
     // A resumed transfer may count from where it picked up: the row never goes back.
@@ -89,33 +83,23 @@ Result runRequest(const BookOrbitBackgroundDownloads::Request& request, std::str
     }
   };
   // The browser's requests go first: one waiting for the network pauses the transfer,
-  // which then resumes from its staged file.
-  const HttpDownloader::CancelCallback yieldOrCancel = [] {
+  // which then resumes from its staged bytes.
+  HttpDownloader::CancelCallback yieldOrCancel = [] {
     return cancelRequested.load() || BookOrbitCatalogClient::requestWaiting();
   };
+  BookOrbitBookDownload::CallbackReporter reporter(std::move(progress), std::move(yieldOrCancel));
   HttpDownloader::DownloadError result = HttpDownloader::HTTP_ERROR;
-  bool resume = false;
   for (;;) {
-    result = BookOrbitBookDownload::transferFile(epubFile.id, outPath, progress, yieldOrCancel, nullptr,
-                                                 /*pausable=*/true, resume);
+    result = BookOrbitCatalogDownload::transferFile(epubFile.id, epubFile.downloadVariant, outPath, reporter,
+                                                    /*pausable=*/true);
     if (result != HttpDownloader::ABORTED || cancelRequested.load()) break;
     LOG_DBG("BOBG", "Book %lld paused for a catalog request", static_cast<long long>(request.bookId));
     // Until the browser's request and the ones right behind it are through.
     while (BookOrbitCatalogClient::requestWaiting() && !cancelRequested.load()) delay(50);
     delay(RESUME_AFTER_MS);
-    resume = true;
   }
-  if (result == HttpDownloader::ABORTED) Storage.remove(BookOrbitBookDownload::stagedPath(outPath).c_str());
-  switch (result) {
-    case HttpDownloader::OK:
-      return Result::Downloaded;
-    case HttpDownloader::ABORTED:
-      return Result::Cancelled;
-    case HttpDownloader::INSUFFICIENT_SPACE:
-      return Result::NoSpace;
-    default:
-      return Result::Failed;
-  }
+  if (result == HttpDownloader::ABORTED) BookOrbitCatalogDownload::discardStaged(outPath);
+  return BookOrbitBookDownload::resultOf(result);
 }
 
 void workerTask(void*) {
@@ -221,7 +205,7 @@ const char* BookOrbitBackgroundDownloads::settle(const Finished& done, bool& onC
   onCard = false;
   switch (done.result) {
     case Result::Downloaded:
-      BookOrbitBookDownload::finishTransfer(done.bookId, done.path);
+      BookOrbitCatalogDownload::finish(done.bookId, done.path);
       onCard = true;
       return tr(STR_BOOK_DOWNLOADED);
     case Result::AlreadyOnCard:

@@ -32,6 +32,8 @@ enum class Trigger : uint8_t {
   SideUpLong,
   SideDownShort,
   SideDownLong,
+  FrontLeftLong,
+  FrontRightLong,
 };
 
 inline constexpr std::array<StrId, CrossPointSettings::QUICK_ACTION_SLOT_ACTION_COUNT> actionLabels = {
@@ -40,14 +42,14 @@ inline constexpr std::array<StrId, CrossPointSettings::QUICK_ACTION_SLOT_ACTION_
     StrId::STR_PAGE_TURN,
     StrId::STR_FORCE_REFRESH,
     StrId::STR_CHANGE_FONT,
-    StrId::STR_TOGGLE_GUIDE_DOTS,
-    StrId::STR_TOGGLE_FOCUS_READING,
+    StrId::STR_GUIDE_READING,
+    StrId::STR_FOCUS_READING,
     StrId::STR_TOGGLE_BOOKMARK,
-    StrId::STR_SYNC_PROGRESS,
+    StrId::STR_SYNC_BOOK,
     StrId::STR_MARK_FINISHED,
     StrId::STR_READING_STATS,
     StrId::STR_SCREENSHOT_BUTTON,
-    StrId::STR_CYCLE_PAGE_TURN,
+    StrId::STR_AUTO_TURN_INTERVAL_SECONDS,
     StrId::STR_FILE_TRANSFER,
     StrId::STR_TILT_PAGE_TURN,
     StrId::STR_READER_DARK_MODE,
@@ -61,11 +63,13 @@ inline constexpr std::array<StrId, CrossPointSettings::QUICK_ACTION_SLOT_ACTION_
 
 // Shared display order for shortcut pickers. The values remain the persisted
 // SHORT_PWRBTN IDs; only their presentation order is centralized here.
-inline constexpr std::array<CrossPointSettings::SHORT_PWRBTN, 35> shortcutActionOrder = {
+inline constexpr std::array<CrossPointSettings::SHORT_PWRBTN, 39> shortcutActionOrder = {
     CrossPointSettings::IGNORE,
     CrossPointSettings::SLEEP,
     CrossPointSettings::PAGE_TURN,
     CrossPointSettings::PREVIOUS_PAGE,
+    CrossPointSettings::SELECT_CHAPTER,
+    CrossPointSettings::ROTATE_FLIP,
     CrossPointSettings::TOGGLE_BOOKMARK,
     CrossPointSettings::PEEK_PAGE,
     CrossPointSettings::SLEEP_AT_CHAPTER_END,
@@ -96,6 +100,8 @@ inline constexpr std::array<CrossPointSettings::SHORT_PWRBTN, 35> shortcutAction
     CrossPointSettings::QUICK_LOCK,
     CrossPointSettings::TOGGLE_FRONTLIGHT,
     CrossPointSettings::TOGGLE_TOUCHSCREEN,
+    CrossPointSettings::TOGGLE_PAGE_TURN_GESTURES,
+    CrossPointSettings::BACK_HOME,
     CrossPointSettings::HOME_READER,
 };
 
@@ -111,14 +117,16 @@ inline bool isActionAvailable(const uint8_t action) {
 #endif
   if (action == CrossPointSettings::READING_STATS && !SETTINGS.shouldTrackReadingStats()) return false;
   if (action == CrossPointSettings::PREVIOUS_PAGE || action == CrossPointSettings::NEARBY_POSITION_SYNC ||
-      action == CrossPointSettings::LIBRARY)
+      action == CrossPointSettings::LIBRARY || action == CrossPointSettings::SELECT_CHAPTER ||
+      action == CrossPointSettings::ROTATE_FLIP)
     return true;
   if (action == CrossPointSettings::QUICK_ACTIONS || action == CrossPointSettings::QUICK_LOCK) return true;
   if (action == CrossPointSettings::BOOKORBIT_SYNC) return true;
   if (action == CrossPointSettings::PEEK_PAGE || action == CrossPointSettings::SLEEP_AT_CHAPTER_END) return true;
   if (action == CrossPointSettings::TOGGLE_FRONTLIGHT) return Frontlight.present();
-  if (action == CrossPointSettings::TOGGLE_TOUCHSCREEN) return gpio.hasTouch();
-  if (action == CrossPointSettings::HOME_READER) return !gpio.hasTouch();
+  if (action == CrossPointSettings::TOGGLE_TOUCHSCREEN || action == CrossPointSettings::TOGGLE_PAGE_TURN_GESTURES)
+    return gpio.hasTouch();
+  if (action == CrossPointSettings::HOME_READER || action == CrossPointSettings::BACK_HOME) return true;
   if (action < CrossPointSettings::QUICK_ACTION_SLOT_ACTION_COUNT) {
     return action != CrossPointSettings::TOGGLE_TILT_PAGE_TURN || supportsTiltPageTurn();
   }
@@ -139,6 +147,7 @@ inline StrId actionLabel(const uint8_t action) {
   if (action == CrossPointSettings::QUICK_ACTIONS) return StrId::STR_QUICK_ACTIONS;
   if (action == CrossPointSettings::TOGGLE_FRONTLIGHT) return StrId::STR_TOGGLE_FRONTLIGHT;
   if (action == CrossPointSettings::TOGGLE_TOUCHSCREEN) return StrId::STR_TOGGLE_TOUCHSCREEN;
+  if (action == CrossPointSettings::TOGGLE_PAGE_TURN_GESTURES) return StrId::STR_DISABLE_PAGE_TURN_GESTURES;
   if (action == CrossPointSettings::QUICK_LOCK) return StrId::STR_QUICK_LOCK;
   if (action == CrossPointSettings::BOOKORBIT_SYNC) return StrId::STR_BOOKORBIT_SYNC;
   if (action == CrossPointSettings::PEEK_PAGE) return StrId::STR_PEEK_PAGE;
@@ -147,6 +156,9 @@ inline StrId actionLabel(const uint8_t action) {
   if (action == CrossPointSettings::NEARBY_POSITION_SYNC) return StrId::STR_NEARBY_POSITION_SYNC;
   if (action == CrossPointSettings::LIBRARY) return StrId::STR_LIBRARY;
   if (action == CrossPointSettings::HOME_READER) return StrId::STR_HOME_READER;
+  if (action == CrossPointSettings::BACK_HOME) return StrId::STR_BACK_HOME;
+  if (action == CrossPointSettings::SELECT_CHAPTER) return StrId::STR_SELECT_CHAPTER;
+  if (action == CrossPointSettings::ROTATE_FLIP) return StrId::STR_ROTATE_FLIP;
   return StrId::STR_HOME_BUTTON_LOCK;
 }
 
@@ -165,6 +177,8 @@ inline void synchronize(CrossPointSettings& settings, Trigger preferred = Trigge
   const bool sideDownShort = settings.sideButtonDownShort == CrossPointSettings::QUICK_ACTIONS;
   const bool sideDownLong = settings.sideButtonDownLong == CrossPointSettings::QUICK_ACTIONS;
 
+  const bool frontLeftLong = settings.frontButtonLeftLong == CrossPointSettings::QUICK_ACTIONS;
+  const bool frontRightLong = settings.frontButtonRightLong == CrossPointSettings::QUICK_ACTIONS;
   Trigger owner = preferred;
   if (owner == Trigger::None) {
     if (shortPower)
@@ -193,6 +207,10 @@ inline void synchronize(CrossPointSettings& settings, Trigger preferred = Trigge
       owner = Trigger::SideDownShort;
     else if (sideDownLong)
       owner = Trigger::SideDownLong;
+    else if (frontLeftLong)
+      owner = Trigger::FrontLeftLong;
+    else if (frontRightLong)
+      owner = Trigger::FrontRightLong;
   }
 
   if (owner != Trigger::ShortPower && shortPower) settings.shortPwrBtn = CrossPointSettings::IGNORE;
@@ -212,10 +230,16 @@ inline void synchronize(CrossPointSettings& settings, Trigger preferred = Trigge
   if (owner != Trigger::SideUpLong && sideUpLong) settings.sideButtonUpLong = CrossPointSettings::IGNORE;
   if (owner != Trigger::SideDownShort && sideDownShort) settings.sideButtonDownShort = CrossPointSettings::IGNORE;
   if (owner != Trigger::SideDownLong && sideDownLong) settings.sideButtonDownLong = CrossPointSettings::IGNORE;
+  if (owner != Trigger::FrontLeftLong && frontLeftLong) settings.frontButtonLeftLong = CrossPointSettings::IGNORE;
+  if (owner != Trigger::FrontRightLong && frontRightLong) settings.frontButtonRightLong = CrossPointSettings::IGNORE;
   settings.quickActionsTrigger = static_cast<uint8_t>(owner);
 }
 
 inline void applyTrigger(CrossPointSettings& settings, const Trigger trigger) {
+  if (settings.frontButtonLeftLong == CrossPointSettings::QUICK_ACTIONS)
+    settings.frontButtonLeftLong = CrossPointSettings::IGNORE;
+  if (settings.frontButtonRightLong == CrossPointSettings::QUICK_ACTIONS)
+    settings.frontButtonRightLong = CrossPointSettings::IGNORE;
   if (settings.shortPwrBtn == CrossPointSettings::QUICK_ACTIONS) settings.shortPwrBtn = CrossPointSettings::IGNORE;
   if (settings.longPwrBtn == CrossPointSettings::QUICK_ACTIONS) settings.longPwrBtn = CrossPointSettings::IGNORE;
   if (settings.longPressBackAction == CrossPointSettings::LONG_MENU_QUICK_ACTIONS) {
@@ -261,6 +285,8 @@ inline void applyTrigger(CrossPointSettings& settings, const Trigger trigger) {
   if (trigger == Trigger::SideUpLong) settings.sideButtonUpLong = CrossPointSettings::QUICK_ACTIONS;
   if (trigger == Trigger::SideDownShort) settings.sideButtonDownShort = CrossPointSettings::QUICK_ACTIONS;
   if (trigger == Trigger::SideDownLong) settings.sideButtonDownLong = CrossPointSettings::QUICK_ACTIONS;
+  if (trigger == Trigger::FrontLeftLong) settings.frontButtonLeftLong = CrossPointSettings::QUICK_ACTIONS;
+  if (trigger == Trigger::FrontRightLong) settings.frontButtonRightLong = CrossPointSettings::QUICK_ACTIONS;
   settings.quickActionsTrigger = static_cast<uint8_t>(trigger);
 }
 
@@ -278,6 +304,8 @@ inline Trigger triggerForSetting(uint8_t CrossPointSettings::* member) {
   if (member == &CrossPointSettings::sideButtonUpLong) return Trigger::SideUpLong;
   if (member == &CrossPointSettings::sideButtonDownShort) return Trigger::SideDownShort;
   if (member == &CrossPointSettings::sideButtonDownLong) return Trigger::SideDownLong;
+  if (member == &CrossPointSettings::frontButtonLeftLong) return Trigger::FrontLeftLong;
+  if (member == &CrossPointSettings::frontButtonRightLong) return Trigger::FrontRightLong;
   return Trigger::None;
 }
 

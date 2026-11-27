@@ -1,7 +1,5 @@
 #include "BookContentIdStub.h"
 
-#include <Epub.h>
-
 #include "util/BookContentId.h"
 #include "util/ProgressSaveTime.h"
 
@@ -11,8 +9,6 @@ std::string stateDir;
 
 std::string BookContentId::bookStateDirName(const std::string&) { return BookContentIdStub::stateDir; }
 std::string BookContentId::bookStateDir(const std::string&) { return BookContentIdStub::stateDir; }
-
-const std::string& Epub::getPath() const { return filepath; }
 
 // Dating a moved position needs the wall clock; these tests are about the progress files.
 void ProgressSaveTime::record(const std::string&) {}

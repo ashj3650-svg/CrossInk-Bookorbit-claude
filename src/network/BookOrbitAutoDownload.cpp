@@ -287,7 +287,5 @@ BookOrbitAutoDownload::Summary BookOrbitAutoDownload::run(const StopCheck should
     BookOrbitNewBooks::add(book->id, book->path, book->title);
   for (size_t i = 0; i < newest.size() && i < MAX_PREPARED; i++)
     summary.paths[summary.preparedCount++] = newest[i].path;
-  // Writes the entries the downloads recorded and frees the in-RAM copy.
-  BookOrbitDownloadIndex::unload();
   return summary;
 }

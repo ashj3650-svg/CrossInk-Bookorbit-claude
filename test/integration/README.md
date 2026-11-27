@@ -87,8 +87,8 @@ CROSSINK_SIM_PROGRAM=.pio/build/x4-classic-simulator/program \
 ```
 
 Some scenarios cover a feature only some boards build: background downloads and
-recent-book sync (PSRAM boards) or Instant Wake (X4 Classic). `BOARD_ONLY` in the
-harness lists them; on any other simulator they print `SKIP` rather than run. The
+recent-book sync (PSRAM boards) or Instant Wake (X4 Classic). Those scenarios are
+marked with `sim.needs(...)`; on any other simulator they print `SKIP` rather than run. The
 board is read from the program's `.pio/build/<env>/program` path, or from
 `CROSSINK_SIM_ENV` when the binary lives elsewhere.
 
@@ -168,6 +168,15 @@ that spelling to the step's markers.
 | `catalog_download_index_migration` | A download index written by an earlier release (BOD1, crafted by the harness) listing three books in series folders no scan visits: opening All books reads the index, which converts it with all three entries and leaves them on the card as BOD2 with no temporary or backup file behind. Fails against the pre-BOD2 index. |
 | `sleep_sync_device_scan` | Under the BookOrbit theme, three sleep syncs on one card (download folder at the root). First, two library books copied to /Inbox and the open book move to the paths the server's naming template gives them (read back from the download index, not recomputed), the open book's state and cache following it; a book in /Read stays and an unknown EPUB is left alone. Then, with the download index and the scan's state deleted and a stray copy of one book added, nothing is moved, the stray copy is deleted and the index is rebuilt identically. Finally, with nothing changed, nothing is hashed and a single match check carries the remembered file's bare hash. Checked against the firmware's `Device scan:` log lines. |
 | `home_refresh_device_scan` | The Home tile's sync runs the card scan in its own network boot: a library book copied twice to /Inbox is filed where the download index says, the other copy is deleted, and the sync ends on the scan's summary before it restarts to Home. |
+| `home_download_returns_home` | A book downloaded from a BookOrbit Home shelf ends on Home, not on a catalog listing. |
+| `catalog_download_resumes` | A download the connection drops resumes where it stopped (Range plus If-Range on the first answer's ETag) instead of starting over, fails only after three attempts in a row that bring nothing more, keeps what it got for the next download of that book, and survives the reader being killed mid-transfer. A stand-in for the server breaks the connection. |
+| `catalog_download_index_beyond_ram_cap` | With 520 books known only through the download index, past the 128 BOD1 kept and the 512 a device without PSRAM kept in RAM, the last entry is All books' first book: its row is marked on the device and Confirm opens it instead of downloading it. All 520 entries stay on the card. |
+| `sleep_sync_home_before_downloads` | PSRAM boards only. The sleep sync refreshes the BookOrbit Home before it downloads missing books, then lists the downloads on Just downloaded (a top shelf set to Recently added becomes Just downloaded). |
+| `sleep_sync_downloads_missing_books` | PSRAM boards only. Download Missing Books: the first sleep downloads every library book missing from the card, newest first; the next finds none missing and leaves a book deleted from the card deleted; turning the setting on again brings it back. |
+| `sleep_sync_recent_books_unchanged` | PSRAM boards only. The first sleep takes the other recent books' server positions, the next finds neither side moved and skips opening them, and a book read on here since is sent again. |
+| `sleep_sync_without_open_book` | With no EPUB open, the sleep sync still runs the BookOrbit Home's sync. |
+| `series_next_on_card` | The End-of-Book screen's first row is the series' next book when the card has it, found through the Library index wherever it is filed, ahead of the next book in its folder; Confirm opens it. |
+| `series_next_download` | PSRAM boards only. With the next book not on the card, Confirm looks the series up on BookOrbit, downloads the book numbered next and opens it. After the series' last book the lookup finds nothing and downloads nothing. |
 
 ### Repeatability
 

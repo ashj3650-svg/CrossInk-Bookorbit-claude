@@ -51,11 +51,11 @@ bool busy();
 uint32_t changeCount();
 
 // The next book that ended, oldest first. Its bookkeeping belongs to the main task: a
-// Downloaded one still needs BookOrbitBookDownload::finishTransfer(), an AlreadyOnCard one
+// Downloaded one still needs BookOrbitCatalogDownload::finish(), an AlreadyOnCard one
 // its download index record.
 bool takeFinished(Finished& out);
 
-// The main task's half of a finished book (finishTransfer() or the download index record).
+// The main task's half of a finished book (BookOrbitCatalogDownload::finish() or the download index record).
 // Returns what to tell the user, or nullptr when nothing needs saying; `onCard` is set when
 // the book is now on the card.
 const char* settle(const Finished& done, bool& onCard);

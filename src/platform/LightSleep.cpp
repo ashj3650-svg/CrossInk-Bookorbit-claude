@@ -8,6 +8,7 @@
 
 #ifndef SIMULATOR
 #include <BoardConfig.h>
+#include <InputWake.h>
 #include <WiFi.h>
 #include <driver/gpio.h>
 #include <esp_err.h>
@@ -20,9 +21,14 @@ namespace LightSleep {
 
 namespace {
 // Called with every source armed by sleepFor(), on both its exits.
-void disarm(const gpio_num_t pin) {
+// The button's GPIO interrupt (InputWake's edge handler) is off for the sleep: armed as a
+// level wake source, it would fire for as long as the waking press lasts and starve every
+// task. disarm() gives it back its edge trigger.
+void disarm(const gpio_num_t pin, const bool restoreEdgeInterrupt) {
   gpio_wakeup_disable(pin);
   esp_sleep_disable_wakeup_source(ESP_SLEEP_WAKEUP_ALL);
+  gpio_set_intr_type(pin, GPIO_INTR_ANYEDGE);
+  if (restoreEdgeInterrupt) gpio_intr_enable(pin);
 }
 
 // The battery latch keeps the board powered. Pins keep their levels through a light sleep
@@ -55,6 +61,8 @@ Wake sleepFor(const uint32_t durationMs) {
   // Nothing else may wake the chip: no deep-sleep source is armed this early, and the
   // disarm() on the way out leaves the next deep sleep with only the sources it arms.
   esp_sleep_disable_wakeup_source(ESP_SLEEP_WAKEUP_ALL);
+  const bool edgeInterrupt = InputWake::watchesPin(powerPin);
+  gpio_intr_disable(pin);
   // The button keeps the pull InputManager gave it, so the idle level stays defined; a
   // level (not edge) trigger is the only kind light sleep offers on GPIOs.
   const esp_err_t gpioErr = gpio_wakeup_enable(pin, activeHigh ? GPIO_INTR_HIGH_LEVEL : GPIO_INTR_LOW_LEVEL);
@@ -63,7 +71,7 @@ Wake sleepFor(const uint32_t durationMs) {
       sourceErr == ESP_OK ? esp_sleep_enable_timer_wakeup(static_cast<uint64_t>(durationMs) * 1000ULL) : sourceErr;
   if (timerErr != ESP_OK) {
     LOG_ERR("SLP", "Light sleep could not be armed (%s)", esp_err_to_name(timerErr));
-    disarm(pin);
+    disarm(pin, edgeInterrupt);
     return Wake::Failed;
   }
 
@@ -71,7 +79,7 @@ Wake sleepFor(const uint32_t durationMs) {
   const esp_err_t sleepErr = esp_light_sleep_start();
   const esp_sleep_wakeup_cause_t cause = esp_sleep_get_wakeup_cause();
   holdPowerLatch(false);
-  disarm(pin);
+  disarm(pin, edgeInterrupt);
   if (sleepErr != ESP_OK) {
     LOG_ERR("SLP", "Light sleep refused (%s)", esp_err_to_name(sleepErr));
     return Wake::Failed;
