@@ -2,7 +2,7 @@
 
 Everything else — fonts, themes, reader features, reading stats, controls, the web server — comes from CrossInk unchanged, with one exception: KOReader Sync is removed to make room (see below). See the [upstream README](https://github.com/uxjulia/CrossInk#readme) for those, and the [docs](./docs/) folder in this repository for the detailed guides.
 
-**Note**: this fork publishes releases for the Xteink X3, X4, X4 Pro and X4 Classic, and the Seeed reTerminal Sticky.
+**Note**: this fork is built and tested for the **Xteink X4 Classic**. The code still builds for the Xteink X3, X4 and X4 Pro and the Seeed reTerminal Sticky, but those are not tested here.
 
 ---
 
@@ -14,7 +14,7 @@ Everything else — fonts, themes, reader features, reading stats, controls, the
 - **BookOrbit catalog browser** — browse your server's library on the device and download EPUBs over WiFi: Continue Reading, All Books, Series, Authors and Want to Read.
 - **Reading statistics pushed to BookOrbit** — your reading time, streaks and pace on the server's dashboard, fed by the pages you turn on the device.
 - **A working clock on the X4** — the status-bar clock, which upstream can only show on hardware that has a clock chip, plus an opt-in mode that keeps the time running through sleep.
-- **Reading and device extras** — a "Previously..." recap after time away, a pinned Peek Page, a sleep timer counted in chapters, Wi-Fi at Home, a startup PIN lock, Battery Use figures and a Search button on the BookOrbit Home (see [Extras](#extras) below).
+- **Reading and device extras** — a "Previously..." recap after time away, a pinned Peek Page, a sleep timer counted in chapters, the next book of a series at the end of a book, Wi-Fi at Home, a sleep sync that covers every recent book and downloads the missing ones, Instant Wake, a startup PIN lock, Battery Use figures, a Search button on the BookOrbit Home and a round of speed work (see [Extras](#extras) below).
 - **KOReader Sync is removed** — its screens, settings and shortcut are gone. The X3/X4 firmware gets a 6.5 MB partition, and this fork's BookOrbit layer plus CrossInk's own growth stopped fitting in it; dropping the second sync provider is what buys the room. Credentials already saved on the SD card are left alone, simply unread.
 
 BookOrbit exposes a KOReader-compatible sync API, so this fork talks to it the same way the official BookOrbit KOReader plugin does. Your BookOrbit server must be recent enough to serve the KOReader plugin endpoints under `{server}/api/v1/koreader` — including `plugin/catalog/*` for the catalog browser and `plugin/annotations/*` / `plugin/bookmarks/*` for highlight and bookmark sync (servers without those are detected, and the missing steps are simply skipped).
@@ -39,21 +39,23 @@ _Screenshots taken in the simulator, with public-domain books from [Standard Ebo
 
 ## Extras
 
-These come with v1.6.1+bookorbit.10 and later. The [changelog](CHANGELOG.md) has the details of each.
+These come with v1.6.1+bookorbit.10 and later; the newest are in the [changelog](CHANGELOG.md)'s Unreleased section, which has the details of each.
 
 ### Reading
 
 - **Previously...** — open a book you have not read for a few days and a card recalls the chapter, how long ago you read it and the last lines you read. Settings → Reader → Recap After Time Away sets the delay or turns it off.
 - **Peek Page** — pin one page, such as a map or a cast list, and jump to it and back from the reader menu's Location tab or a shortcut.
 - **Sleep at Chapter End** — from the reader menu's More tab, sleep after this chapter, 2 chapters or 3.
+- **Next in series** — when the book you finish is numbered in a series, the End-of-Book screen offers the next one: it opens it from the card, or downloads it from BookOrbit when it is not there yet.
+- **Back to the menu** — Back from a screen opened from the Home menu (Library, Browse Files, BookOrbit, Settings and the others) returns to the menu, on the entry you opened.
 
 ### BookOrbit and Wi-Fi (X4 Classic, X4 Pro and reTerminal Sticky)
 
-- **Wi-Fi at Home** — Wi-Fi joins your network while Home shows and goes off in a book, on sleep, or after 10 idle minutes. A network you join by hand in Settings → System → Wi-Fi Networks stays connected too. The web page answers at http://ashadsbook.local/. Settings → System → Wi-Fi at Home.
+- **Wi-Fi at Home** — Wi-Fi joins your network quietly while Home shows, with a Wi-Fi icon next to the battery, and goes off in a book, on sleep, or after 10 idle minutes. A network you join by hand in Settings → System → Wi-Fi Networks stays connected too. While it is connected, the file transfer web page, WebDAV and the Calibre plugin answer at http://ashadsbook.local/ with no File Transfer screen, which then leaves out Join a Network and Calibre Wireless. Settings → System → Wi-Fi at Home.
 - **Sync on open** — opening a book with Wi-Fi at Home connected first fetches its latest BookOrbit position.
 - **Sleep sync for recent books** — the sync behind the sleep screen covers up to 10 recent books, and the most recently saved position wins.
 - **Download Missing Books** — the sleep sync downloads every book of your BookOrbit library that is not on the card, newest first (Settings → BookOrbit Sync). A book you delete from the card stays deleted. It stops when the card is nearly full or the battery is below 15%. The **Just downloaded** shelf on the Library page shows the newest ones, so you can see what arrived and open it from there.
-- **Background catalog downloads** — downloads from the catalog run while you keep browsing.
+- **Background downloads** — downloads from the catalog run while you keep browsing, and a BookOrbit Home shelf book that is not on the card downloads behind a short notice while Wi-Fi at Home is connected.
 
 ### Speed
 
@@ -62,7 +64,8 @@ Index ahead, Next page ready and covers from memory need the extra memory of the
 - **Index ahead** — while you read, the next three chapters are laid out in the background, so new chapters open without "Indexing".
 - **Next page ready** — the next page is read and its letters prepared while you read the current one.
 - **Work done while asleep** — after the sleep sync, the Library list, newly downloaded books and Home covers are made ready, so those screens open without waiting.
-- **Covers from memory** — the BookOrbit Home keeps the covers it drew in PSRAM until you open a book.
+- **Covers from memory** — the BookOrbit Home keeps the covers it drew in PSRAM until you open a book, and the reader makes the Home covers of the book you are reading a few seconds after you settle on a page, so Home never shows "Loading".
+- **Smoother text** — the reader remembers far more of the letters it has drawn, and saves those of your reading font at sleep (`.crosspoint/glyph_cache.bin`), so pages after a wake appear without drawing each letter again.
 - **Faster covers and Wi-Fi** — covers decode at a reduced size for thumbnails, and Wi-Fi joins your router directly instead of scanning every channel.
 - **Performance Mode** — Settings → System → Performance Mode (on by default) keeps full CPU speed and quick button checks while the reader is on; turn it off for longer battery life.
 - **Instant Wake** (X4 Classic) — Settings → System → Device → Instant Wake (60 minutes by default). For that long after it goes to sleep, the reader keeps everything in memory, so Power brings it straight back without a restart. Then it finishes going to sleep: the sleep sync (when Sync on Sleep is on), then deep sleep. Off makes every sleep a deep sleep.
