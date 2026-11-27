@@ -10825,20 +10825,20 @@ class SimulatorSmokeTest {
           break;
         }
         inputCompletionStep = SmokeStep::StatsUploadReturn;
-        // Sync actions live in File Transfer. With stats and clippings sync off,
-        // Sync Books is the last Sync Server row, just above the Nearby rows that
-        // end the list.
-        activityManager.goToFileTransfer();
-        inputScript.push_back(render("File Transfer", 10));
-        inputScript.push_back(assertActivity("NetworkModeSelection"));
-        for (int i = 0; i < nearbyFileTransferRows() + 1; ++i) {
-          addTap(MappedInputManager::Button::Up);
-          inputScript.push_back(render("File Transfer row up", 5));
+        // This fork's File Transfer lists no Sync Server rows, even with an account saved.
+        // Sync Books still opens the way File Transfer used to start it.
+        if (NetworkModeSelectionActivity::offersMode(NetworkMode::SYNC_BOOKS) ||
+            NetworkModeSelectionActivity::offersMode(NetworkMode::SYNC_READING_STATS) ||
+            NetworkModeSelectionActivity::offersMode(NetworkMode::SYNC_CLIPPINGS))
+          fail("File Transfer lists a Sync Server row");
+        {
+          auto sync = std::make_unique<StatsUploadActivity>(renderer, mappedInputManager, std::string{},
+                                                            StatsUploadActivity::Scope::Library, false);
+          sync->setReturnToFileTransfer(std::string{}, false);
+          activityManager.replaceActivity(std::move(sync));
         }
-        inputScript.push_back(render("Sync Books selected", 5));
-        addTap(MappedInputManager::Button::Confirm);
-        inputScript.push_back(assertActivity("StatsUpload"));
         inputScript.push_back(render("Sync Books confirmation", 10));
+        inputScript.push_back(assertActivity("StatsUpload"));
         addTap(MappedInputManager::Button::Back);  // Opening does not upload.
         inputScript.push_back(assertActivity("Home"));
         step = SmokeStep::ReaderInput;

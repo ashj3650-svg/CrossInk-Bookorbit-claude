@@ -27,7 +27,8 @@ enum class NetworkMode {
  * - "Create Hotspot" - Create an Access Point that others can connect to (AP mode)
  * - "Nearby Stats Sync" - Sync reading stats directly with a nearby reader
  * - "Receive File" - Receive a file directly from another reader
- * - "Sync Books", "Sync Reading Stats", "Sync Clippings" - Sync Server uploads
+ * - "Sync Books", "Sync Reading Stats", "Sync Clippings" - Sync Server uploads (never
+ *   listed in this fork, see entryVisible())
  *
  * The onModeSelected callback is called with the user's choice.
  * The onCancel callback is called if the user presses back.
@@ -78,4 +79,7 @@ class NetworkModeSelectionActivity final : public Activity {
 
   void onModeSelected(NetworkMode mode);
   void onCancel();
+
+  // Whether the menu would list this mode now (settings and saved accounts decide).
+  static bool offersMode(NetworkMode mode);
 };
