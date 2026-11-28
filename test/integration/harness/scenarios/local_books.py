@@ -6,9 +6,11 @@ the index for its book rows' on-device marks."""
 from __future__ import annotations
 
 import json
+import re
 import urllib.parse
 
 from formats import read_progress_bin, write_progress_bin
+from kosync import partial_md5
 from server import load_seed, sim_device
 from sim import (HOME_TILE_SYNC, LIBRARY, TO_CATALOG, UI_THEME_BOOKORBIT, SimFs, file_transfer_portal, portal_request,
                  presses, run_simulator, sd_card, sleep_sync)
@@ -213,3 +215,60 @@ def scenario_web_move_keeps_book_state() -> None:
                 f"{name}'s recent entry did not follow it: {recent_paths}"
         assert fs.path("/books/Backup.epub.bak").exists() and not fs.path("/books/Backup.epub").exists(), \
             "the WebDAV rename to a non-book name did not happen"
+
+
+def scenario_sleep_sync_adopts_hand_copied_library() -> None:
+    """The whole library copied to the card by hand, each book where a catalog download
+    would have put it (the download folder plus the server's naming template), with no
+    download index: one sleep sync files every book and Download Missing Books then finds
+    none missing and downloads nothing. Then every book is copied again under its old path
+    as a new file (as when BookOrbit rewrote the metadata and the books were fetched again):
+    the next sleep sync files each one again in place and still downloads nothing."""
+    manifest, library = load_seed()
+    sim = sim_device(manifest)
+    files = {b["hash"]: b["file"] for b in library}
+    with sd_card(manifest, download_folder="/Downloads") as fs:
+        fs.enable_sync_on_sleep()
+        fs.update_settings(uiTheme=UI_THEME_BOOKORBIT)
+        fs.update_bookorbit(autoDownloadNew=True)
+        placed = {}
+        for item in sim.catalog_manifest():
+            epub = next((f for f in item["files"] if f["format"].lower() == "epub"), None)
+            if epub is None or epub["fileHash"] not in files:
+                continue
+            device_path = "/".join(s for s in epub["devicePath"].split("/") if s)
+            sd_path = f"{fs.download_folder}/{device_path}"
+            fs.place(LIBRARY / files[epub["fileHash"]], sd_path)
+            placed[item["id"]] = sd_path
+        assert len(placed) > 50, f"only {len(placed)} books placed"
+
+        output = sleep_sync(fs, timeout_s=600)
+        scan = "\n".join(line for line in output.splitlines() if "Device scan" in line or "Library:" in line)
+        index = {book_id: path for book_id, path, _ in fs.read_download_index()}
+        missing = sorted(set(placed) - set(index))
+        assert not missing, f"{len(missing)} hand-copied books not filed, e.g. {missing[:5]}:\n{scan}"
+        # Books whose server file another scenario rewrote are not placed, so they download.
+        def downloaded(output: str) -> set[int]:
+            return {int(i) for i in re.findall(r"Book (\d+) -> .+: result 0$", output, re.MULTILINE)}
+        assert not downloaded(output) & set(placed), "a hand-copied book was downloaded again:\n" + scan
+
+        # Every book deleted and copied again under its old path, as a new copy of the file
+        # (here: grown past the bytes the partial MD5 samples, so the server still knows it).
+        # The download index drops each entry as replaced, and the Library keeps each book's
+        # arrival number, so before the fix no pass ever looked at them again.
+        filed = {book_id: path for book_id, path, _ in fs.read_download_index()}
+        for path in filed.values():
+            host = fs.path(path)
+            before = partial_md5(host)
+            with host.open("ab") as book:
+                book.write(b"\0" * 512)
+            assert partial_md5(host) == before, f"growing {path} changed its hash"
+        output = sleep_sync(fs, timeout_s=600)
+        scan = "\n".join(line for line in output.splitlines() if "Device scan" in line or "Library:" in line)
+        index = {book_id: path for book_id, path, _ in fs.read_download_index()}
+        assert index == filed, f"the replaced books were not filed again in place:\n{scan}"
+        assert f"Device scan: asked={len(filed)} matched={len(filed)} moved=0" in output, \
+            "the pass did not ask about every replaced book:\n" + scan
+        assert re.search(r"Library: \d+ books, 0 missing from the card, 0 deleted", output), \
+            "Download Missing Books does not see the replaced books as on the card:\n" + scan
+        assert not downloaded(output), "a hand-copied book was downloaded after being replaced"

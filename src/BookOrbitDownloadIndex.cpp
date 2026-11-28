@@ -556,7 +556,8 @@ void BookOrbitDownloadIndex::record(const int64_t bookId, const std::string& pat
   recordAll(&download, 1);
 }
 
-void BookOrbitDownloadIndex::findPaths(const std::string* paths, const size_t n, bool* outClaimed) {
+void BookOrbitDownloadIndex::findPaths(const std::string* paths, const size_t n, bool* outClaimed,
+                                       const uint32_t* sizes) {
   if (paths == nullptr || outClaimed == nullptr || n == 0) return;
   std::fill_n(outClaimed, n, false);
   Reader in;
@@ -573,7 +574,8 @@ void BookOrbitDownloadIndex::findPaths(const std::string* paths, const size_t n,
   std::string scratch;
   while (in.next(index, record)) {
     for (size_t i = 0; i < n; i++) {
-      if (!outClaimed[i] && in.pathIs(record, paths[i], hashes[i], scratch)) outClaimed[i] = true;
+      if (outClaimed[i] || (sizes != nullptr && record.fileSize != sizes[i])) continue;
+      if (in.pathIs(record, paths[i], hashes[i], scratch)) outClaimed[i] = true;
     }
   }
 }

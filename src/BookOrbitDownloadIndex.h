@@ -48,9 +48,10 @@ void recordAll(const Download* downloads, size_t n);
 // recordAll() for one download.
 void record(int64_t bookId, const std::string& path);
 
-// Sets outClaimed[i] when some recorded download claims exactly paths[i]. One pass: lets a
+// Sets outClaimed[i] when some recorded download claims exactly paths[i], and, when sizes is
+// given, recorded it at sizes[i] bytes: a file replaced since is not claimed. One pass: lets a
 // directory scan skip the files the index already holds.
-void findPaths(const std::string* paths, size_t n, bool* outClaimed);
+void findPaths(const std::string* paths, size_t n, bool* outClaimed, const uint32_t* sizes = nullptr);
 
 // findPaths() for one path.
 bool hasPath(const std::string& path);
