@@ -29,8 +29,7 @@ namespace {
 
 // prepare() -> run(): the books to ask about (see docs/file-formats.md).
 constexpr char WORK_PATH[] = "/.crosspoint/bookorbit_scan.bin";
-// Between passes: the last Library arrival handled, the server's library token, and the
-// files the server did not recognise.
+// Between passes: the server's library token and the files the server did not recognise.
 constexpr char STATE_PATH[] = "/.crosspoint/bookorbit_recognition.bin";
 constexpr char STATE_TMP_PATH[] = "/.crosspoint/bookorbit_recognition.tmp";
 constexpr char WORK_MAGIC[4] = {'B', 'O', 'S', '2'};
@@ -44,7 +43,6 @@ constexpr size_t BATCH = 12;
 // Library books looking for new ones are checked against the download index this many at a
 // time, one pass over it each (see BookOrbitDownloadIndex).
 constexpr size_t CANDIDATES = 32;
-constexpr uint16_t FIRST_SEEN_SATURATED = 0xFFFE;  // the Library's arrival counter stops there
 
 // Books hashed per pass, which bounds the time a sync spends on a card full of new books;
 // the next pass carries on. Files remembered as unrecognised, at 8 bytes of RAM each while
@@ -62,7 +60,7 @@ struct WorkHeader {
 struct StateHeader {
   char magic[4];
   uint32_t serverCrc;
-  uint16_t watermark;  // Library arrival number below which every book has been handled
+  uint16_t watermark;  // the Library's next arrival number at the last full pass (not read back)
   uint16_t reserved;
   char libraryVersion[HASH_LEN];  // the server's token when the remembered files were last asked about
   uint32_t count;
@@ -164,16 +162,13 @@ struct Known {
   uint32_t size;
 };
 
-// Rebuilds the Library index when the card may have changed since it was built, as the
-// Library itself would on its next visit; a cancelled or failed build leaves the previous one.
+// Rebuilds the Library index before every pass, even one the device counts as current: that
+// flag rides through deep sleep and the sync restarts, and cannot see a card edited in a
+// computer meanwhile. Unchanged books keep their metadata, so the walk is short. A cancelled
+// or failed build leaves the previous index.
 bool openLibraryIndex(library::LibraryIndexFile& index, bool (*cancelled)(),
                       const BookOrbitDeviceScan::Progress* progress) {
   const bool metadata = SETTINGS.libraryUseMetadata != 0;
-  if (!library::libraryIndexNeedsRefresh() && index.open(library::libraryIndexPath()) &&
-      index.header().metadataEnabled == static_cast<uint8_t>(metadata)) {
-    return true;
-  }
-  index.close();
   const unsigned long startMs = millis();
   library::BuildStats stats;
   library::BuildCallbacks callbacks;
@@ -202,11 +197,6 @@ void BookOrbitDeviceScan::prepare(bool (*cancelled)(), const Progress* progress)
   StateHeader state;
   const bool haveState = openState(stateFile, state);
   const uint16_t next = index.header().nextFirstSeen;
-  if (state.watermark == next && next < FIRST_SEEN_SATURATED) {
-    if (haveState) stateFile.close();
-    return;  // nothing arrived since the last pass
-  }
-  if (state.watermark > next) state.watermark = 0;  // the Library index started over
 
   // The files the server did not recognise, so that a pass cut short does not ask again.
   const size_t knownCap = std::min<size_t>(state.count, maxRemembered());
@@ -236,17 +226,19 @@ void BookOrbitDeviceScan::prepare(bool (*cancelled)(), const Progress* progress)
   uint16_t stride = 0;
   if (checkpoints) index.buildFolderCheckpoints(checkpoints.get(), stride);
 
-  // A Library book that may be new: arrived since the last pass, an EPUB, not one the server
-  // already did not recognise. Its record is read again for the title once it is hashed.
+  // A Library book that may be new to the download index: an EPUB, not one the server already
+  // did not recognise. Every book counts, not only those that arrived since the last pass: a
+  // file replaced under its old path (a new copy with updated metadata) keeps its arrival
+  // number. Its record is read again for the title once it is hashed.
   struct Candidate {
     uint16_t ordinal;
-    uint16_t firstSeen;
     uint32_t fileSize;
     uint32_t pathHash;
   };
   struct Candidates {
     Candidate items[CANDIDATES];
     std::string paths[CANDIDATES];
+    uint32_t sizes[CANDIDATES];
     bool claimed[CANDIDATES];
     size_t count;
   };
@@ -255,7 +247,6 @@ void BookOrbitDeviceScan::prepare(bool (*cancelled)(), const Progress* progress)
   bool ok = static_cast<bool>(batch);
   if (!ok) LOG_ERR("BookOrbit", "Device scan out of memory");
 
-  uint16_t watermark = next;  // lowered to the first arrival left for the next pass
   std::string title;
   std::string author;
   library::ClixRecord entry;
@@ -269,7 +260,7 @@ void BookOrbitDeviceScan::prepare(bool (*cancelled)(), const Progress* progress)
         break;
       }
       std::string& path = batch->paths[batch->count];
-      if (!index.readRecord(i, entry) || entry.firstSeen < state.watermark) continue;
+      if (!index.readRecord(i, entry)) continue;
       if (!index.readPath(entry, path, checkpoints.get(), stride) || path.size() > PATH_MAX_LEN ||
           !FsHelpers::hasEpubExtension(path)) {
         continue;
@@ -280,18 +271,17 @@ void BookOrbitDeviceScan::prepare(bool (*cancelled)(), const Progress* progress)
         asked = known[k].pathHash == pathHash && known[k].size == entry.fileSize;
       }
       if (asked) continue;
-      batch->items[batch->count++] = Candidate{i, entry.firstSeen, entry.fileSize, pathHash};
+      batch->sizes[batch->count] = entry.fileSize;
+      batch->items[batch->count++] = Candidate{i, entry.fileSize, pathHash};
     }
     if (!ok) break;
-    // A file the download index holds is a catalog book already in place: not hashed.
-    BookOrbitDownloadIndex::findPaths(batch->paths, batch->count, batch->claimed);
+    // A file the download index holds, at the size it recorded, is a catalog book already in
+    // place: not hashed. One replaced since is hashed and filed again.
+    BookOrbitDownloadIndex::findPaths(batch->paths, batch->count, batch->claimed, batch->sizes);
     for (size_t k = 0; k < batch->count && ok; k++) {
       const Candidate& candidate = batch->items[k];
       if (batch->claimed[k]) continue;
-      if (header.count >= maxNewPerPass()) {
-        if (candidate.firstSeen < watermark) watermark = candidate.firstSeen;
-        continue;
-      }
+      if (header.count >= maxNewPerPass()) continue;  // the next pass finds the rest
       if (cancelled != nullptr && cancelled()) {
         ok = false;
         break;
@@ -312,16 +302,22 @@ void BookOrbitDeviceScan::prepare(bool (*cancelled)(), const Progress* progress)
       report(progress, Step::Hashing, candidate.ordinal + 1u, books);
     }
   }
-  header.watermark = watermark;
+  header.watermark = next;
+  if (ok && header.count == 0) {
+    // The usual case once the card is known: run() then only asks whether the server's
+    // library changed.
+    work.close();
+    Storage.remove(WORK_PATH);
+    return;
+  }
   ok = ok && work.seek(0) && work.write(&header, sizeof(header)) == sizeof(header);
   work.close();
   if (!ok) {
     Storage.remove(WORK_PATH);  // cancelled or failed: the next pass starts over
     return;
   }
-  LOG_INF("BookOrbit", "Device scan: %u new books of %u in the Library (arrivals %u..%u, %lu ms)",
-          static_cast<unsigned>(header.count), static_cast<unsigned>(books), static_cast<unsigned>(state.watermark),
-          static_cast<unsigned>(next), millis() - startMs);
+  LOG_INF("BookOrbit", "Device scan: %u new books of %u in the Library (%lu ms)", static_cast<unsigned>(header.count),
+          static_cast<unsigned>(books), millis() - startMs);
 }
 
 // --- run() -------------------------------------------------------------------------------

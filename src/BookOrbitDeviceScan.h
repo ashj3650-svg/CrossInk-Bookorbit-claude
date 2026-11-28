@@ -10,8 +10,9 @@
  * catalog marks them, lists them under "On device" and the BookOrbit Home counts them.
  *
  * The candidates come from the Library index, which already lists every book on the card:
- * the EPUBs it saw arrive since the last pass (its records' `firstSeen`, kept across
- * renames) that the download index does not know. Each is hashed the way KOReader and
+ * the EPUBs the download index does not hold at their current size. That includes a file
+ * replaced under its old path (a new copy with updated metadata), which the download index
+ * drops as replaced. Each is hashed the way KOReader and
  * BookOrbit do (partial MD5) and the server is asked which book the hash belongs to,
  * through the KOReader plugin's match check. That also recognises files the server has
  * since rewritten or delivered converted, and hashes linked by hand. Files the server does
@@ -52,8 +53,9 @@ struct Summary {
   size_t duplicates = 0;  // copies deleted because the book was already filed
 };
 
-// Offline half, before Wi-Fi: rebuilds the Library index when the card changed since it was
-// built, then hashes the books that arrived since the last pass into a work file for run().
+// Offline half, before Wi-Fi: rebuilds the Library index (the card may have been edited in a
+// computer while the device slept), then hashes the EPUBs the download index does not hold at
+// their current size, and the server did not already decline, into a work file for run().
 void prepare(bool (*cancelled)(), const Progress* progress = nullptr);
 
 // Online half, with Wi-Fi up: identifies what prepare() found (and, when the server's

@@ -1584,15 +1584,16 @@ to version 2 the first time the index is loaded.
 ### Version 1
 
 What the BookOrbit theme's syncs keep between two passes of the device scan, which
-recognises books copied to the card (see `src/BookOrbitDeviceScan.h`): the last Library
-arrival handled, the server's library token, and the EPUBs the server did not recognise.
-Books it recognises are not listed here: they join `bookorbit_downloads.bin`.
+recognises books copied to the card (see `src/BookOrbitDeviceScan.h`): the server's library
+token and the EPUBs the server did not recognise. Books it recognises are not listed here:
+they join `bookorbit_downloads.bin`.
 
-`watermark` is a `firstSeen` value of the Library index (`library.idx`): every book that
-arrived before it has been handled, so a pass only looks at the books with a `firstSeen` at
-or above it, and none at all while it equals the index's `nextFirstSeen`. Renames keep a
-book's `firstSeen`. An index that starts over (a `nextFirstSeen` below the watermark) resets
-it to 0.
+Each pass rebuilds the Library index and looks at every EPUB on the card that
+`bookorbit_downloads.bin` does not hold at its current size and that is not listed here at
+its current size, so a book copied while the device slept, or replaced under its old path,
+is found. `watermark` records the Library index's `nextFirstSeen` at the last pass that
+handled every book; earlier releases only looked at books that arrived at or after it, and
+it is no longer read.
 
 The unrecognised files are asked about again, by bare hash so that the server does not list
 them for review a second time, when the token the server sends with its answers
